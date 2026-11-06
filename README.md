@@ -8,6 +8,16 @@ Designed around the strict hardware constraints of the device (**1.4 GB RAM + 3.
 
 ---
 
+## 📸 Screenshots
+
+| **Overview Dashboard (5G SA & Telemetry)** | **Adaptive Multi-Subscription Mihomo Routing** |
+| :---: | :---: |
+| ![Overview Dashboard](./docs/screenshots/overview.png) | ![VPN Multi-Subscription Routing](./docs/screenshots/vpn-routing.png) |
+| **Wi-Fi Clients & Per-Device Split Routing** | **80% Hardware Charge Limit & 8-Zone Thermal Matrix** |
+| ![Wi-Fi Clients & Policy Binding](./docs/screenshots/wifi-clients.png) | ![Power & 8-Zone Thermal Matrix](./docs/screenshots/power-thermal.png) |
+
+---
+
 ## ✨ Key Features
 
 ### 1. Ultra-Lightweight Full-Featured Web Console (`:8080`)

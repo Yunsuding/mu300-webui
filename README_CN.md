@@ -8,6 +8,16 @@
 
 ---
 
+## 📸 界面预览 (Screenshots)
+
+| **全局概览大盘 (5G SA 信号 / 实时吞吐 / 快捷锁频)** | **单/多订阅自适应融合与出口 IP 探测** |
+| :---: | :---: |
+| ![全局概览大盘](./docs/screenshots/overview.png) | ![多订阅自适应代理分流](./docs/screenshots/vpn-routing.png) |
+| **在线终端管理与按设备策略组分流绑定** | **80% 硬件寄存器限充与 8 温区传感器矩阵** |
+| ![在线终端与按设备分流](./docs/screenshots/wifi-clients.png) | ![80% 硬件限充与 8 区温控](./docs/screenshots/power-thermal.png) |
+
+---
+
 ## ✨ 核心特性
 
 ### 1. 极轻量全功能 Web 控制台 (`:8080`)
