@@ -681,7 +681,7 @@ DHCP_HOSTS_FILE = "/etc/mu300/dhcp-hosts.conf"
 MIHOMO_SOCK_PATH = "/run/mu300-vpn/mihomo-control.sock"
 
 def get_mac_to_live_ips():
-    """读取当前局域网各 MAC 正在使用的实时 IP (ARP 邻居表 + DHCP 租约 + 变更前缓存，0 子进程开销)"""
+    """读取当前局域网各 MAC 正在使用的实时 IP (邻居表 IPv4/IPv6 + ARP + DHCP 租约 + 变更前缓存)"""
     subnet_prefix, gw_ip = get_lan_subnet()
     mac_ips = {}
 
@@ -690,13 +690,27 @@ def get_mac_to_live_ips():
         ip_str = str(ip_str or "").strip()
         if not re.match(r"^([0-9a-f]{2}:){5}[0-9a-f]{2}$", mac_str) or mac_str == "00:00:00:00:00:00":
             return
-        if not ip_str.startswith(subnet_prefix) or ip_str == gw_ip:
+        is_lan_v4 = ip_str.startswith(subnet_prefix) and ip_str != gw_ip
+        is_global_v6 = ":" in ip_str and not ip_str.startswith("fe80:") and not ip_str.startswith("::")
+        if not (is_lan_v4 or is_global_v6):
             return
         lst = mac_ips.setdefault(mac_str, [])
         if ip_str not in lst:
             lst.append(ip_str)
 
-    # 1. 优先读取 /proc/net/arp 中活跃的局域网邻居 IP
+    # 1. 优先读取 ip -br neigh 获取所有活动邻居 (同时覆盖 IPv4 与 IPv6，耗时约 2ms)
+    try:
+        proc = subprocess.run(["ip", "-br", "neigh", "show", "dev", "br-lan"], capture_output=True, text=True, timeout=0.8)
+        if proc.returncode == 0:
+            for line in proc.stdout.splitlines():
+                parts = line.split()
+                if len(parts) >= 2:
+                    ip_p, mac_p = parts[0], parts[1].lower()
+                    _add(mac_p, ip_p)
+    except Exception:
+        pass
+
+    # 2. 读取 /proc/net/arp 中活跃的局域网邻居 IP
     if os.path.exists("/proc/net/arp"):
         try:
             with open("/proc/net/arp", "r", encoding="utf-8", errors="ignore") as f:
@@ -1410,15 +1424,19 @@ def extract_mihomo_sub_data(yaml_path):
             if stripped.startswith("- "):
                 curr_item = {"name": "", "lines": []}
                 proxy_items.append(curr_item)
+                base_sub_indent = None
                 # 统一标准化为 2 空格缩进 "  - "
                 curr_item["lines"].append("  - " + stripped[2:] + "\n")
                 after_dash = stripped[2:].strip()
                 if after_dash.startswith("name:"):
                     curr_item["name"] = after_dash.split(":", 1)[1].strip().strip("'\"")
             elif curr_item is not None:
-                # 保持子属性层级缩进（若原文件顶层列表无缩进则补 2 空格）
                 lead_spaces = len(line) - len(line.lstrip(" "))
-                norm_line = ("  " + line) if lead_spaces < 4 else line
+                if base_sub_indent is None:
+                    base_sub_indent = lead_spaces
+                # 保持相对缩进：直接子属性设为 4 空格，深层嵌套属性（如 reality-opts）按相对差值递增
+                rel_indent = max(0, lead_spaces - base_sub_indent)
+                norm_line = (" " * (4 + rel_indent)) + stripped
                 curr_item["lines"].append(norm_line + "\n")
                 if stripped.startswith("name:"):
                     curr_item["name"] = stripped.split(":", 1)[1].strip().strip("'\"")
@@ -1718,15 +1736,16 @@ def build_merged_vpn_config(apply_live=True):
         if grp not in group_names and grp != "DIRECT":
             grp = default_group
         target_ips = []
-        if re.match(r"^\d+\.\d+\.\d+\.\d+$", ip):
+        if re.match(r"^\d+\.\d+\.\d+\.\d+$", ip) or (":" in ip and not ip.startswith("fe80:")):
             target_ips.append(ip)
         if mac and mac in mac_live_ips:
             for lip in mac_live_ips[mac]:
-                if re.match(r"^\d+\.\d+\.\d+\.\d+$", lip) and lip not in target_ips:
+                if lip not in target_ips:
                     if lip not in bound_ip_owner or bound_ip_owner[lip] == mac:
                         target_ips.append(lip)
         for tip in target_ips:
-            rule_s = f"SRC-IP-CIDR,{tip}/32,{grp}"
+            cidr_suffix = "/128" if ":" in tip else "/32"
+            rule_s = f"SRC-IP-CIDR,{tip}{cidr_suffix},{grp}"
             if grp == "DIRECT":
                 if rule_s not in client_pure_direct_rules:
                     client_pure_direct_rules.append(rule_s)
@@ -1990,6 +2009,14 @@ def test_node_latency(profile_id, group_name, node_name):
     if node_name == 'REJECT':
         return {"ok": 1, "delay": None}
 
+    # 优先通过 Mihomo 控制 socket 进行真实的代理链路延迟测速 (真实反映经过代理节点的端到端延迟)
+    for test_url in ["http://cp.cloudflare.com/generate_204", "https://www.gstatic.com/generate_204"]:
+        q = urllib.parse.urlencode({"url": test_url, "timeout": 3000})
+        code, res = mihomo_controller_request("GET", f"/proxies/{urllib.parse.quote(node_name, safe='')}/delay?{q}", timeout=3.5)
+        if code == 200 and isinstance(res, dict) and isinstance(res.get("delay"), int) and res["delay"] > 0:
+            return {"ok": 1, "delay": res["delay"]}
+
+    # Fallback: 若控制 socket 未响应或临时异常，退化为 TCP 握手测速
     yaml_candidates = [
         '/run/mu300-vpn/mihomo.yaml',
         f'/etc/mu300/vpn/profiles/{profile_id or "mihomo"}/config.yaml'
@@ -2006,17 +2033,12 @@ def test_node_latency(profile_id, group_name, node_name):
         port = int(p_info.get('port', 443))
         t0 = time.time()
         try:
-            s = socket.create_connection((server, port), timeout=3.0)
-            s.close()
+            s_conn = socket.create_connection((server, port), timeout=2.5)
+            s_conn.close()
             ms = max(1, round((time.time() - t0) * 1000))
             return {"ok": 1, "delay": ms}
         except Exception:
             pass
-
-    q = urllib.parse.urlencode({"url": "https://www.gstatic.com/generate_204", "timeout": 3500, "expected": "204"})
-    code, res = mihomo_controller_request("GET", f"/proxies/{urllib.parse.quote(node_name, safe='')}/delay?{q}", timeout=4.2)
-    if code == 200 and isinstance(res, dict) and isinstance(res.get("delay"), int) and res["delay"] > 0:
-        return {"ok": 1, "delay": res["delay"]}
 
     return {"ok": 1, "delay": None, "error": "节点连接超时"}
 

@@ -2550,7 +2550,7 @@
           });
 
           if (el) {
-            const summaryParts = list.filter(x => x && x.ip).map(x => `${x.group}:${x.ip}`);
+            const summaryParts = list.filter(Boolean).map(x => `${x.group}:${x.ip || '超时'}`);
             el.innerText = summaryParts.length ? summaryParts.join(' | ') : '探测超时';
           }
           showToast('策略组出口 IP 探测完成');
