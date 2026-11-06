@@ -1,0 +1,17 @@
+[Unit]
+Description=U30 Air Modern Lightweight WebUI Daemon
+After=network.target network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=root
+WorkingDirectory=/opt/u30air-webui
+ExecStart=/usr/bin/python3 /opt/u30air-webui/server.py
+Restart=always
+RestartSec=5
+StandardOutput=journal
+StandardError=journal
+
+[Install]
+WantedBy=multi-user.target

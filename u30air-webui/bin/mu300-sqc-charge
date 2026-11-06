@@ -1,0 +1,113 @@
+#!/usr/bin/python3
+"""U30 Air vendor 5.4 charging adapter, using the kernel's SQC HAL.
+
+ABI: Enceka kernel b50db5b6224c, sqc_v8/sqc_common.h and sqc_charger_hal.c.
+Only PRIMARY/PMIC_ENABLE is addressed: (1 << PRIMARY) * 256 + 17.
+The ordinary power_supply status setter is a no-op with VENDOR_SQC_CHARGER.
+The ZTE battery_charging_enabled attribute only votes for the Android daemon.
+"""
+import os
+from pathlib import Path
+import re
+import stat
+import struct
+import sys
+
+DEVICE = Path('/dev/sqc_chg_node')
+CLASS_DEV = Path('/sys/class/sqc_chg_node/sqc_chg_node/dev')
+CHARGER = Path('/sys/class/power_supply/bq2560x_charger')
+REGISTERS = CHARGER / 'device/registers'
+ENABLE_OFFSET = 273
+
+
+def registers():
+    return {int(k, 16): int(v, 16) for k, v in re.findall(
+        r'^Reg\[([0-9a-f]{2})\] = 0x([0-9a-f]{2})$',
+        REGISTERS.read_text().split('SLAVE Reg:')[0], re.M)}
+
+
+def checked_registers():
+    r = registers()
+    if not {0, 1, 5, 11} <= r.keys() or ((r[11] >> 3) & 15) != 2:
+        raise RuntimeError('Unrecognised primary charger; refusing to change it')
+    return r
+
+
+def read_enable(fd):
+    os.lseek(fd, ENABLE_OFFSET, os.SEEK_SET)
+    data = os.read(fd, 4)
+    if len(data) != 4:
+        raise RuntimeError('Short SQC read')
+    value = struct.unpack('<I', data)[0]
+    if value not in (0, 1):
+        raise RuntimeError('Invalid SQC charging state')
+    return value
+
+
+def apply_enable(fd, value, before):
+    os.lseek(fd, ENABLE_OFFSET, os.SEEK_SET)
+    if os.write(fd, struct.pack('<I', value)) != 4:
+        raise RuntimeError('Short SQC write')
+    if value:
+        # SQC's enable callback starts an 80-second watchdog for Android's
+        # userspace feeder. Linux has no such feeder. Restore its PREVIOUS
+        # watchdog bits through the driver's register interface, retaining
+        # all other REG05 bits. This device normally has the watchdog off.
+        after = checked_registers()
+        if after[5] & 0x30 != before[5] & 0x30:
+            restored = (after[5] & ~0x30) | (before[5] & 0x30)
+            REGISTERS.write_text(f'0 05 {restored:02x}\n')
+    after = checked_registers()
+    if read_enable(fd) != value or bool(after[1] & 0x10) != bool(value):
+        raise RuntimeError('Charger did not accept the requested state')
+    if after[0] & 0x80 != before[0] & 0x80 or after[1] & 0x20 != before[1] & 0x20:
+        raise RuntimeError('Unexpected USB power-path change')
+    if value and after[5] & 0x30 != before[5] & 0x30:
+        raise RuntimeError('Could not restore the watchdog setting')
+
+
+def set_enable(fd, value):
+    before = checked_registers()
+    if read_enable(fd) == value:
+        return
+    if value and before[1] & 0x20:
+        raise RuntimeError('USB OTG is active; refusing to enable charging')
+    try:
+        apply_enable(fd, value, before)
+    except (OSError, ValueError, RuntimeError):
+        if value:
+            # An incomplete resume must not leave an unfed watchdog running
+            # or report successful charging. The native disable callback also
+            # stops that watchdog, without cutting the USB input path.
+            os.lseek(fd, ENABLE_OFFSET, os.SEEK_SET)
+            os.write(fd, struct.pack('<I', 0))
+        raise
+
+
+def main():
+    if len(sys.argv) != 2 or sys.argv[1] not in ('get', 'on', 'off'):
+        raise RuntimeError('usage: mu300-sqc-charge get|on|off')
+    if os.geteuid() != 0:
+        raise RuntimeError('root is required')
+    if os.uname().release != '5.4.254-gb50db5b6224c':
+        raise RuntimeError('Unverified kernel ABI; refusing SQC access')
+    info = DEVICE.stat()
+    major, minor = map(int, CLASS_DEV.read_text().strip().split(':'))
+    if not stat.S_ISCHR(info.st_mode) or (os.major(info.st_rdev), os.minor(info.st_rdev)) != (major, minor):
+        raise RuntimeError('SQC device does not match the kernel class')
+    fd = os.open(DEVICE, os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW)
+    try:
+        checked_registers()
+        if sys.argv[1] != 'get':
+            set_enable(fd, int(sys.argv[1] == 'on'))
+        print(read_enable(fd))
+    finally:
+        os.close(fd)
+
+
+if __name__ == '__main__':
+    try:
+        main()
+    except (OSError, ValueError, RuntimeError) as error:
+        print(f'mu300-sqc-charge: {error}', file=sys.stderr)
+        sys.exit(1)
