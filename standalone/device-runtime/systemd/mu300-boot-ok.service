@@ -1,0 +1,17 @@
+[Unit]
+Description=MU300 mark Linux boot successful (re-arm the Linux slot when Linux is the default)
+# Not After=multi-user.target: that waits for every service, and one that hangs (mobile data stuck on a busy AT
+# channel did) left the boot unconfirmed, so the next reboot counted it as failed and moved towards Android. A
+# boot you can log in to over USB is a good one - anything else on it can be fixed from there.
+After=mu300-usb-net.service ssh.socket
+
+[Service]
+Type=oneshot
+# reachable over USB: the boot indicator (mu300-led boot on in mu300-fixups, LED_BOOT=1) ends
+ExecStartPre=-/opt/mu300/bin/mu300-led boot off
+# give the system a moment to prove it is usable before committing to the next Linux boot
+ExecStartPre=/bin/sleep 30
+ExecStart=/opt/mu300/bin/mu300-next-boot --rearm
+
+[Install]
+WantedBy=multi-user.target

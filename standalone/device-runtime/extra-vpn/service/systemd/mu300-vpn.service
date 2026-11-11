@@ -1,0 +1,21 @@
+[Unit]
+Description=MU300 VPN (profiles: Xray, sing-box, mihomo, WireGuard, OpenVPN)
+After=mu300-firewall.service mu300-mobile-data.service
+Wants=mu300-mobile-data.service
+ConditionPathExists=/etc/mu300/vpn.conf
+StartLimitIntervalSec=0
+
+[Service]
+ExecStart=/opt/mu300/bin/mu300-vpn run
+# the engine exits when it starts before the modem has a route to the server (sing-box: "missing default
+# interface"; xray: the server name does not resolve yet), and on a renewed server certificate; keep retrying
+# instead of hitting the start limit and giving up
+Restart=always
+RestartSec=10
+# xray ran out of its 1024 descriptors once while the modem was off ("accept4: too many open files": every client
+# connection it could not forward stays open); mu300-power stops the service now while the modem is off, and the
+# engine gets room for a busy LAN in any case
+LimitNOFILE=65536
+
+[Install]
+WantedBy=multi-user.target

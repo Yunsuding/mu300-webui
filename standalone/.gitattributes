@@ -1,0 +1,6 @@
+# Keep all Linux device runtime scripts, awk/shell libraries, systemd units and manifests strictly LF on Windows
+* -text
+*.md text eol=lf
+*.py text eol=lf
+*.json text eol=lf
+*.cmd text eol=crlf

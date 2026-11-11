@@ -1,0 +1,90 @@
+{
+  "schema": 3,
+  "baseline_tag": "v2026.10.27.2",
+  "baseline_commit": "fa7bd593c5da6bf7963164e5a274253c4705960f",
+  "release_repo": "Yunsuding/mu300-webui",
+  "release_tag": "baseline-v2026.10.27.2",
+  "description": "Self-hosted golden offline flashing & patched VPN binary bundles for ZTE U30 Air (Ubuntu 24.04 LTS + Vendor Linux 5.4.254)",
+  "bundles": [
+    {
+      "group": "core-offline-flasher",
+      "name": "mu300-magisk-v2026.10.27.2-ubuntu-24.04-k5.4.zip",
+      "url": "https://github.com/Yunsuding/mu300-webui/releases/download/baseline-v2026.10.27.2/mu300-magisk-v2026.10.27.2-ubuntu-24.04-k5.4.zip",
+      "fallback_url": "https://github.com/dikeckaan/mu300-linux/releases/download/v2026.10.27.2/mu300-magisk-v2026.10.27.2-ubuntu-24.04-k5.4.zip",
+      "size_bytes": 214009863,
+      "sha256": "c7b9e3b68d86752d687e512020dbc7c60724ea38f30296ad490757178dcd12ff",
+      "purpose": "All-in-one offline installer (unpack on Windows/macOS/Linux to run start.cmd / start.sh without internet, OR flash directly in Magisk on rooted Android)"
+    },
+    {
+      "group": "u30air-patched-vpn",
+      "name": "u30air-patched-vpn-mihomo.tar.gz",
+      "url": "https://github.com/Yunsuding/mu300-webui/releases/download/baseline-v2026.10.27.2/u30air-patched-vpn-mihomo.tar.gz",
+      "size_bytes": 28236098,
+      "sha256": "37274947f5a7b9a4a265745c38ac97a920161ad6f557f82f02ce39f3453aed9d",
+      "purpose": "Patched U30 Air VPN framework (mu300-vpn + mihomo.sh) + Mihomo ARM64 engine (GPL-3.0) + GeoIP/GeoSite"
+    },
+    {
+      "group": "split-release-images",
+      "name": "mu300-kernel.tar.gz",
+      "url": "https://github.com/Yunsuding/mu300-webui/releases/download/baseline-v2026.10.27.2/mu300-kernel.tar.gz",
+      "fallback_url": "https://github.com/dikeckaan/mu300-linux/releases/download/v2026.10.27.2/mu300-kernel.tar.gz",
+      "size_bytes": 28015474,
+      "sha256": "6dc27c7ed31ad88609f12b0b61edfa0ef7c6eef746f1693ccb08d8178cde2d52",
+      "purpose": "Vendor Linux 5.4.254 kernel Image, U30 Air kernel modules, busybox & boot ramdisk segment"
+    },
+    {
+      "group": "split-release-images",
+      "name": "mu300-ubuntu-rootfs.tar.gz",
+      "url": "https://github.com/Yunsuding/mu300-webui/releases/download/baseline-v2026.10.27.2/mu300-ubuntu-rootfs.tar.gz",
+      "fallback_url": "https://github.com/dikeckaan/mu300-linux/releases/download/v2026.10.27.2/mu300-ubuntu-rootfs.tar.gz",
+      "size_bytes": 183995638,
+      "sha256": "386da051b5b6594b94aa15a96cf891724f295101450e3eefedd7cf5e7e6e0a53",
+      "purpose": "Clean Ubuntu 24.04 LTS (Noble) ARM64 root filesystem for install.ps1 / install.sh"
+    },
+    {
+      "group": "split-release-images",
+      "name": "mu300-ubuntu-rootfs.manifest.gz",
+      "url": "https://github.com/Yunsuding/mu300-webui/releases/download/baseline-v2026.10.27.2/mu300-ubuntu-rootfs.manifest.gz",
+      "fallback_url": "https://github.com/dikeckaan/mu300-linux/releases/download/v2026.10.27.2/mu300-ubuntu-rootfs.manifest.gz",
+      "size_bytes": 465090,
+      "sha256": "d5d1c74510f28d857a46143c018b107085c32884b98cf105651aafcc255faf15",
+      "purpose": "Signed file manifest of Ubuntu 24.04 rootfs"
+    },
+    {
+      "group": "release-signatures",
+      "name": "mu300-release",
+      "url": "https://github.com/Yunsuding/mu300-webui/releases/download/baseline-v2026.10.27.2/mu300-release",
+      "fallback_url": "https://github.com/dikeckaan/mu300-linux/releases/download/v2026.10.27.2/mu300-release",
+      "size_bytes": 14,
+      "sha256": "dca47aebbfa306cb3f232d98e24a73bbf0b6852ba0c8eaa4c6453be31a60c50f",
+      "purpose": "Release metadata tag descriptor"
+    },
+    {
+      "group": "release-signatures",
+      "name": "SHA256SUMS",
+      "url": "https://github.com/Yunsuding/mu300-webui/releases/download/baseline-v2026.10.27.2/SHA256SUMS",
+      "fallback_url": "https://github.com/dikeckaan/mu300-linux/releases/download/v2026.10.27.2/SHA256SUMS",
+      "size_bytes": 1586,
+      "sha256": "ce26697f7eef731a6b360386beee5c236a833199ecbce8f6b49c63898e343fe0",
+      "purpose": "Official SHA256 checksums for release assets"
+    },
+    {
+      "group": "release-signatures",
+      "name": "SHA256SUMS.sig",
+      "url": "https://github.com/Yunsuding/mu300-webui/releases/download/baseline-v2026.10.27.2/SHA256SUMS.sig",
+      "fallback_url": "https://github.com/dikeckaan/mu300-linux/releases/download/v2026.10.27.2/SHA256SUMS.sig",
+      "size_bytes": 151,
+      "sha256": "f664979f74c0fdba614f87331398700d757d6be8cc68427724e7cd5d5dddd1f6",
+      "purpose": "Ed25519 signature verified by release.pub"
+    },
+    {
+      "group": "release-signatures",
+      "name": "SHA256SUMS-magisk",
+      "url": "https://github.com/Yunsuding/mu300-webui/releases/download/baseline-v2026.10.27.2/SHA256SUMS-magisk",
+      "fallback_url": "https://github.com/dikeckaan/mu300-linux/releases/download/v2026.10.27.2/SHA256SUMS-magisk",
+      "size_bytes": 1709,
+      "sha256": "74707e3008564b45870a2a4bf77fefd79df1571468470e398d59c985c4a38621",
+      "purpose": "Official SHA256 checksums for offline Magisk/PC zip bundles"
+    }
+  ]
+}

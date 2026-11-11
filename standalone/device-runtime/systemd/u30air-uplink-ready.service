@@ -1,0 +1,10 @@
+# U30 Air managed startup v1
+[Unit]
+Description=U30 Air bounded startup uplink readiness
+After=network.target
+
+[Service]
+Type=oneshot
+ExecStart=/opt/mu300/bin/u30air-wait-uplink --timeout 45
+TimeoutStartSec=55
+RemainAfterExit=yes

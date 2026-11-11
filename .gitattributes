@@ -1,0 +1,12 @@
+* text=auto eol=lf
+*.cmd text eol=crlf
+*.png binary
+*.jpg binary
+*.gz binary
+*.zip binary
+standalone/** -text
+standalone/*.md text eol=lf
+standalone/*.py text eol=lf
+standalone/*.json text eol=lf
+standalone/*.example text eol=lf
+standalone/*.cmd text eol=crlf

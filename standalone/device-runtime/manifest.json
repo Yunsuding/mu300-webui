@@ -1,0 +1,2707 @@
+{
+  "schema": 1,
+  "source_image_version": "v2026.10.27.2",
+  "kernel": "5.4.254-gb50db5b6224c",
+  "captured_at": "20261112-003720",
+  "entry_count": 280,
+  "entries": [
+    {
+      "device_path": "/etc/mu300/bluetooth.conf.example",
+      "repo_path": "etc-mu300-templates/bluetooth.conf.example",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 97,
+      "sha256": "a27403c17ef741e948de5479ad9b31aa69ef181d961276b088ae1f33a32ccd2e"
+    },
+    {
+      "device_path": "/etc/mu300/default-boot",
+      "repo_path": "etc-mu300-templates/default-boot",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 6,
+      "sha256": "d745fba1cb70ab9dc02a80eeba8a1864a0f32b2941e008c0af389be7b56ba830"
+    },
+    {
+      "device_path": "/etc/mu300/firewall.nft",
+      "repo_path": "etc-mu300-templates/firewall.nft",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1429,
+      "sha256": "21e28042f55e1abba2b74fc11ce39f867e23c07446c852effa05950c532abf5d"
+    },
+    {
+      "device_path": "/etc/mu300/image-manifest.gz",
+      "repo_path": "etc-mu300-templates/image-manifest.gz",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 465090,
+      "sha256": "d5d1c74510f28d857a46143c018b107085c32884b98cf105651aafcc255faf15"
+    },
+    {
+      "device_path": "/etc/mu300/image-packages",
+      "repo_path": "etc-mu300-templates/image-packages",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1407,
+      "sha256": "77ce84ff7721a5bdd5bdb2d9a1f69e33aadef3a01ed288e51761bda6cda7c5dd"
+    },
+    {
+      "device_path": "/etc/mu300/image-version",
+      "repo_path": "etc-mu300-templates/image-version",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 14,
+      "sha256": "dca47aebbfa306cb3f232d98e24a73bbf0b6852ba0c8eaa4c6453be31a60c50f"
+    },
+    {
+      "device_path": "/etc/mu300/kmsg-ignore",
+      "repo_path": "etc-mu300-templates/kmsg-ignore",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 926,
+      "sha256": "337d12f4f566ae34e25eb4612c40e2e96b54e0aff1ea5d000f695be77c0a645e"
+    },
+    {
+      "device_path": "/etc/mu300/lan.conf.example",
+      "repo_path": "etc-mu300-templates/lan.conf.example",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 394,
+      "sha256": "da5e34921ca5446296c17927b7f6543935868b0f02ac210d31de70b54cccb428"
+    },
+    {
+      "device_path": "/etc/mu300/mobile-data.conf.example",
+      "repo_path": "etc-mu300-templates/mobile-data.conf.example",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 2537,
+      "sha256": "3960ae4199f3c3c3c1bc32ad0cb7d16f12c9ca82afab07108439689d355d8b8b"
+    },
+    {
+      "device_path": "/etc/mu300/power.conf",
+      "repo_path": "etc-mu300-templates/power.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 245,
+      "sha256": "baded98a14e81263ce31367c0ebdf7516011ff1440d59fe30a42fe96c08ce009"
+    },
+    {
+      "device_path": "/etc/mu300/update-source.example",
+      "repo_path": "etc-mu300-templates/update-source.example",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 2011,
+      "sha256": "9fe9887e5fad132dbffad3ebcc3940d3cf4c27ac5b7f5189eb2ff39080a67871"
+    },
+    {
+      "device_path": "/etc/mu300/vpn.conf.example",
+      "repo_path": "etc-mu300-templates/vpn.conf.example",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 2384,
+      "sha256": "9c1a02349b335f9b81705be72b3a53d3c09c7f8089dd7461fd60078d58e5fbe6"
+    },
+    {
+      "device_path": "/etc/sysctl.d/10-bufferbloat.conf",
+      "repo_path": "system-tuning/sysctl.d/10-bufferbloat.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 481,
+      "sha256": "763c2e237645fb7c3fecf16a54479e49c39aab229c2a646a42f16c83b9dd2974"
+    },
+    {
+      "device_path": "/etc/sysctl.d/90-u30air-emmc.conf",
+      "repo_path": "system-tuning/sysctl.d/90-u30air-emmc.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 69,
+      "sha256": "70f390ad5f16c6dcc3aaad1eadfc146e94970c557e451d197d5fdf669ddc2b8b"
+    },
+    {
+      "device_path": "/etc/sysctl.d/98-mu300-modules.conf",
+      "repo_path": "system-tuning/sysctl.d/98-mu300-modules.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 299,
+      "sha256": "4cec8f307840d73cfa55fffbdd654c1561399885cbd8002152bc40c94dfa37b6"
+    },
+    {
+      "device_path": "/etc/sysctl.d/99-mu300-console.conf",
+      "repo_path": "system-tuning/sysctl.d/99-mu300-console.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 247,
+      "sha256": "9ae5073fbd8add23cf3f62f31bfa4c190c7d569298db2bcc76bd601c659a0c9b"
+    },
+    {
+      "device_path": "/etc/systemd/journald.conf.d/10-mu300.conf",
+      "repo_path": "system-tuning/systemd/journald.conf.d/10-mu300.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 118,
+      "sha256": "1ff9e4f0a24cbe3952b6101892a227ff6e1d187a6bff846dcac6a87d79b5d89d"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-accounts.service",
+      "repo_path": "systemd/mu300-accounts.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 443,
+      "sha256": "3e0ad760551dce009140f25c2ba04b32e8ff093d27efe5d6e399540db5a33fa9"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-adbd.service",
+      "repo_path": "systemd/mu300-adbd.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 765,
+      "sha256": "ea03745cea0d6568de5c31513d52b73b3c0c41da8a37346a8bc70569172dc14a"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-atd.service",
+      "repo_path": "systemd/mu300-atd.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 402,
+      "sha256": "5064c8182f02d42790a0d282733d3377062f05cd317bc2ada00fb8f7265d9162"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-atd2.service",
+      "repo_path": "systemd/mu300-atd2.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 606,
+      "sha256": "42a3af73a5aeb8d6214d54eda3b2fe6ca2a2548e7196e84b1bcae7d49f5156a9"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-bluetooth.service",
+      "repo_path": "systemd/mu300-bluetooth.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 336,
+      "sha256": "4aed91707820f2dad9e6c645673a3d18d1732ee04118f8a7fe419151686818f5"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-boot-ok.service",
+      "repo_path": "systemd/mu300-boot-ok.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 829,
+      "sha256": "8042a14ab0d647afb9346fdf62f4be0d203591005ac7dbf26a8e4bcdfdddf308"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-buttons.service",
+      "repo_path": "systemd/mu300-buttons.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 314,
+      "sha256": "da0c14ebdcb71c66e1fb3bd775cea9a0e241049123bcf57a3f4c65ad3f1d65d1"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-cp_diskserver.service",
+      "repo_path": "systemd/mu300-cp_diskserver.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1317,
+      "sha256": "256c787d0d68af44fc0ba401c9dd1f4369251ea468a1ff5f603eff7a5f0b119e"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-cpu-voltage-good.service",
+      "repo_path": "systemd/mu300-cpu-voltage-good.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 187,
+      "sha256": "6b4975131fc8fe0b887bd69a8fa85fcc860cc7256a4482f7437211b0c9604046"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-cpu-voltage-good.timer",
+      "repo_path": "systemd/mu300-cpu-voltage-good.timer",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 169,
+      "sha256": "507c486591a13121db3246e1c997cd9135d8580af719f0128e15f4861f14a6b1"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-cpu-voltage.service",
+      "repo_path": "systemd/mu300-cpu-voltage.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 761,
+      "sha256": "7f9caf4ceaa634796dea8c7bd71f4ae6710176016f2de2e9c6b1030b959dda26"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-cpu.service",
+      "repo_path": "systemd/mu300-cpu.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 256,
+      "sha256": "214f5c3e31a547b4886a3cb700d1027067bbd32c6cd3b34df91d52349046907e"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-early-recorder.service",
+      "repo_path": "systemd/mu300-early-recorder.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 238,
+      "sha256": "6bdd3e9a665f17cd43b218ce6f222d1d980be4849d8612d76c810b2e73ae7710"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-extra-modules.service",
+      "repo_path": "systemd/mu300-extra-modules.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 295,
+      "sha256": "8b50dc8864a4764c60611709dd09772dcc2ab16da6e2938ae5dff2ed0ef774a7"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-firewall.service",
+      "repo_path": "systemd/mu300-firewall.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 315,
+      "sha256": "62e1596e57354461af17dc19a5998dc2f483cc5a109e21cb4cbd51b7182c6b71"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-fixups.service",
+      "repo_path": "systemd/mu300-fixups.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 718,
+      "sha256": "f543e482e8ddea9245309fbc4c72badf09aec74fb29f8869b5a13d4c6a5b23d9"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-hotspot.service",
+      "repo_path": "systemd/mu300-hotspot.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1114,
+      "sha256": "add214036ac88a73430205a172541f41d2ce3ef30d533cca7626329be82cb668"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-kmsg.service",
+      "repo_path": "systemd/mu300-kmsg.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 260,
+      "sha256": "3af9472c08c95605cb4fcb55e0d335bde2cab55e8499512021b0ae6c558d19d1"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-lan.service",
+      "repo_path": "systemd/mu300-lan.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 351,
+      "sha256": "bbd69b2f628f10c3f2445f868234a501c43f1fd3268219ae09f7c6ae86c46c11"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-lock-replay.service",
+      "repo_path": "systemd/mu300-lock-replay.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 561,
+      "sha256": "fcb8d80e57d0be499bc94b5b6ffc5ddbf178eaa6dab2a1f7168b12b6295058f0"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-mobile-data-watch.service",
+      "repo_path": "systemd/mu300-mobile-data-watch.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 807,
+      "sha256": "0fe73de8f55cc9a8787b91ffc7fc9e59437e54272edc8dae2d21e4e774d81624"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-mobile-data.service",
+      "repo_path": "systemd/mu300-mobile-data.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1307,
+      "sha256": "518795f187a507c2ad61deabb23a34662c4d5b483f66f34f091fe5858eaed912"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-modem-log.service",
+      "repo_path": "systemd/mu300-modem-log.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 294,
+      "sha256": "9bcc93dec7f0a92128f9a8de7ef548248d523c6fe183a717ec70dc394efdaa96"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-modprobe-guard.service",
+      "repo_path": "systemd/mu300-modprobe-guard.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 340,
+      "sha256": "5550a4425d16617debd9bf232bf90c385d54752cdeaaa0369068a0b6afa364d8"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-power.service",
+      "repo_path": "systemd/mu300-power.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 565,
+      "sha256": "4dabef31f72cbc71fa447927b26e452b7c0ae5ca998fb6f19faeb93c3a435eaa"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-refnotify.service",
+      "repo_path": "systemd/mu300-refnotify.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 689,
+      "sha256": "c71554b408fc9b93d4cef31005e9dc344f06c8727d924e880ca6b0cade771ab0"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-sms-forward.service",
+      "repo_path": "systemd/mu300-sms-forward.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1351,
+      "sha256": "2c61ff8d089298cfd196d049611db939718ce42773e9a409bd3be32f810b6dab"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-ssh-hostkeys.service",
+      "repo_path": "systemd/mu300-ssh-hostkeys.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 509,
+      "sha256": "81fa26e02836203b9ac98d7d8364ae40b11f522ae818b0278fa56e9d6d4eac2e"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-telnetd.service",
+      "repo_path": "systemd/mu300-telnetd.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 206,
+      "sha256": "622b3293c94fe7dbd8b12c51c389632b7270302231476458b5a1e63d1e3771ed"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-thermal-guard.service",
+      "repo_path": "systemd/mu300-thermal-guard.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 199,
+      "sha256": "39eb1abf758c056321cb152271e788b15ac8e0b9f5cdbaef26790dd392aad8ba"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-toolkit.service",
+      "repo_path": "systemd/mu300-toolkit.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 406,
+      "sha256": "07bda7cae5fcc33ec46c310cc2a7ed5f982583cce403fd4681cf8d66fcb4c625"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-traffic.service",
+      "repo_path": "systemd/mu300-traffic.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 424,
+      "sha256": "a3aa61d121898f94dc64824220e99e02aa30396a5d3b293581ddfeb1dffab0a2"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-update-notice.service",
+      "repo_path": "systemd/mu300-update-notice.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 227,
+      "sha256": "e01c753dba9f8f8facc54e8468298e62ccf5ac54a656bd700034eb396a2e20bf"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-update-notice.timer",
+      "repo_path": "systemd/mu300-update-notice.timer",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 225,
+      "sha256": "6b4adeaf789a467c1756de5ac65a3a350f4a7b840fe36d1736af4512b7723a8c"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-user-packages.service",
+      "repo_path": "systemd/mu300-user-packages.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 392,
+      "sha256": "f7878cf5621f3296a43cfbc24549a4f65bae20eac1a8954d5cea6270631b3896"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-vendor.service",
+      "repo_path": "systemd/mu300-vendor.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 982,
+      "sha256": "ffeb70b2ae7217ed6071702425e970d514d64a00b89cfd0088a4a70847e35721"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-vpn-subscriptions.service",
+      "repo_path": "systemd/mu300-vpn-subscriptions.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 248,
+      "sha256": "660c2a77ad9fc29b156ce41b0af2ab031dfd6f5d5c7067328c484e31385bf92e"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-vpn-subscriptions.service.d",
+      "repo_path": "systemd/mu300-vpn-subscriptions.service.d",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-vpn-subscriptions.service.d/u30air-merge.conf",
+      "repo_path": "systemd/mu300-vpn-subscriptions.service.d/u30air-merge.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 163,
+      "sha256": "8574f01a0e2330adb6f9580e8ae6e4283f749d19a347ae139edd62e91f520375"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-vpn-subscriptions.timer",
+      "repo_path": "systemd/mu300-vpn-subscriptions.timer",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 179,
+      "sha256": "391a31616e49fbbb0d0ace1d8bfde0aeb4033ebaa7ab60518f335066ea06edfb"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-vpn-subscriptions.timer.d",
+      "repo_path": "systemd/mu300-vpn-subscriptions.timer.d",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-vpn-subscriptions.timer.d/interval.conf",
+      "repo_path": "systemd/mu300-vpn-subscriptions.timer.d/interval.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 44,
+      "sha256": "43efad0614d0336bd607e1159bcdf8e605a9f5fda20205633330aa57557b8685"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-vpn.service",
+      "repo_path": "systemd/mu300-vpn.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 909,
+      "sha256": "3b168381c413d388ed06266e8dd6d446cd495a9ec70f48ad2f611c92aa5cfc2c"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-vpn.service.d",
+      "repo_path": "systemd/mu300-vpn.service.d",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-vpn.service.d/affinity.conf",
+      "repo_path": "systemd/mu300-vpn.service.d/affinity.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 26,
+      "sha256": "3c4b9c11f4bc29a65a44f4208a9e5336551a8d79eeba12339ad3f776185fcda1"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-wcn-reopen.service",
+      "repo_path": "systemd/mu300-wcn-reopen.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 242,
+      "sha256": "cfaa73f8595e9d199ed347b08bff6d3ca7121ba544e10660dea9bb6dfefb18a6"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-wifi-client.service",
+      "repo_path": "systemd/mu300-wifi-client.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 740,
+      "sha256": "67102de86c5d294e6737b07abecd9c7fe9c73840e18a73d2c5f1ff40b48c5b54"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-wifi-scan-mode.service",
+      "repo_path": "systemd/mu300-wifi-scan-mode.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 414,
+      "sha256": "04d3690a0a5eec82becb4713ff788dae1f19075ad43d1eef318e81c71850f63c"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-wifi.service",
+      "repo_path": "systemd/mu300-wifi.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 252,
+      "sha256": "4a3d40c157a3ced7e959cc2180177dfe2d98fab6f560862fd85a9aab8f40934d"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-zram.service",
+      "repo_path": "systemd/mu300-zram.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 304,
+      "sha256": "0a2f593217a4d90e4167a8abc34fb385a026100fc7dbcd7007707098f7280711"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-adbd.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-adbd.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-adbd.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-atd.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-atd.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-atd.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-atd2.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-atd2.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-atd2.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-boot-ok.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-boot-ok.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-boot-ok.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-buttons.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-buttons.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-buttons.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-cp_diskserver.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-cp_diskserver.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-cp_diskserver.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-cpu-voltage.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-cpu-voltage.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-cpu-voltage.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-cpu.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-cpu.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-cpu.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-extra-modules.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-extra-modules.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-extra-modules.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-hotspot.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-hotspot.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-hotspot.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-lan.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-lan.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-lan.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-lock-replay.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-lock-replay.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-lock-replay.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-mobile-data-watch.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-mobile-data-watch.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-mobile-data-watch.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-mobile-data.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-mobile-data.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-mobile-data.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-modem-log.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-modem-log.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-modem-log.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-power.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-power.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-power.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-refnotify.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-refnotify.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-refnotify.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-sms-forward.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-sms-forward.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-sms-forward.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-thermal-guard.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-thermal-guard.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-thermal-guard.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-toolkit.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-toolkit.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-toolkit.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-traffic.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-traffic.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-traffic.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-user-packages.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-user-packages.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-user-packages.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-vpn.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-vpn.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-vpn.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-wifi-client.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-wifi-client.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-wifi-client.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-wifi-scan-mode.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-wifi-scan-mode.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-wifi-scan-mode.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/mu300-wifi.service",
+      "repo_path": "systemd/multi-user.target.wants/mu300-wifi.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-wifi.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/multi-user.target.wants/u30air-webui.service",
+      "repo_path": "systemd/multi-user.target.wants/u30air-webui.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/u30air-webui.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/swap.target.wants/mu300-zram.service",
+      "repo_path": "systemd/swap.target.wants/mu300-zram.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-zram.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/sysinit.target.wants/mu300-accounts.service",
+      "repo_path": "systemd/sysinit.target.wants/mu300-accounts.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-accounts.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/sysinit.target.wants/mu300-early-recorder.service",
+      "repo_path": "systemd/sysinit.target.wants/mu300-early-recorder.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-early-recorder.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/sysinit.target.wants/mu300-firewall.service",
+      "repo_path": "systemd/sysinit.target.wants/mu300-firewall.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-firewall.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/sysinit.target.wants/mu300-fixups.service",
+      "repo_path": "systemd/sysinit.target.wants/mu300-fixups.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-fixups.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/sysinit.target.wants/mu300-kmsg.service",
+      "repo_path": "systemd/sysinit.target.wants/mu300-kmsg.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-kmsg.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/sysinit.target.wants/mu300-modprobe-guard.service",
+      "repo_path": "systemd/sysinit.target.wants/mu300-modprobe-guard.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-modprobe-guard.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/sysinit.target.wants/mu300-ssh-hostkeys.service",
+      "repo_path": "systemd/sysinit.target.wants/mu300-ssh-hostkeys.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-ssh-hostkeys.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/sysinit.target.wants/mu300-vendor.service",
+      "repo_path": "systemd/sysinit.target.wants/mu300-vendor.service",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-vendor.service"
+    },
+    {
+      "device_path": "/etc/systemd/system/timers.target.wants/mu300-cpu-voltage-good.timer",
+      "repo_path": "systemd/timers.target.wants/mu300-cpu-voltage-good.timer",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-cpu-voltage-good.timer"
+    },
+    {
+      "device_path": "/etc/systemd/system/timers.target.wants/mu300-update-notice.timer",
+      "repo_path": "systemd/timers.target.wants/mu300-update-notice.timer",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-update-notice.timer"
+    },
+    {
+      "device_path": "/etc/systemd/system/timers.target.wants/mu300-vpn-subscriptions.timer",
+      "repo_path": "systemd/timers.target.wants/mu300-vpn-subscriptions.timer",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/etc/systemd/system/mu300-vpn-subscriptions.timer"
+    },
+    {
+      "device_path": "/etc/systemd/system/u30air-uplink-ready.service",
+      "repo_path": "systemd/u30air-uplink-ready.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 230,
+      "sha256": "440c7b94e156cecb692a5bf6a4fd48588312fd3a659a86349eaa67a9cd38e694"
+    },
+    {
+      "device_path": "/etc/systemd/system/u30air-webui.service",
+      "repo_path": "systemd/u30air-webui.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 394,
+      "sha256": "49558a19c217ada14ec708b7c45bc0766ed83b353b4887d12cea3d087e401e11"
+    },
+    {
+      "device_path": "/etc/udev/rules.d/70-mu300-wcn.rules",
+      "repo_path": "system-tuning/udev/rules.d/70-mu300-wcn.rules",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 574,
+      "sha256": "7b1cf8b386e62e1b9a277616c895fe10f66a5a421c5136afe2ae36fc7250606b"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/.mu300/boot-attempts",
+      "repo_path": "boot-meta/boot-attempts",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 2,
+      "sha256": "f0b5c2c2211c8d67ed15e75e656c7862d086e9245420892a7de62cd9ec582a06"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/.mu300/boot-os",
+      "repo_path": "boot-meta/boot-os",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 7,
+      "sha256": "da4d47d486c674b0e05b992713276b345aaa1858d3f147b4b185ad5215cfdc69"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/boot/installed.id",
+      "repo_path": "boot-meta/installed.id",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 65,
+      "sha256": "351febbb32a9f5839152800d608e4bd5367d93bdbffe4331394df7a158977325"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/boot/installed.kernel",
+      "repo_path": "boot-meta/installed.kernel",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4,
+      "sha256": "a520f016494c9248ad56f69ca564f9fb491ecf6f326651d6cb5d895f929ef569"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/boot/installed.tag",
+      "repo_path": "boot-meta/installed.tag",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 14,
+      "sha256": "dca47aebbfa306cb3f232d98e24a73bbf0b6852ba0c8eaa4c6453be31a60c50f"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/boot/kernel",
+      "repo_path": "boot-meta/kernel",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4,
+      "sha256": "a520f016494c9248ad56f69ca564f9fb491ecf6f326651d6cb5d895f929ef569"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/boot/written.sha256",
+      "repo_path": "boot-meta/written.sha256",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 65,
+      "sha256": "5ff045d73b7126afec4e73e701021bb11accbc7aa95de1903f455d24b9e4be15"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn",
+      "repo_path": "extra-vpn",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn-mihomo/VERSION",
+      "repo_path": "extra-vpn-mihomo-meta/VERSION",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 7,
+      "sha256": "375065d2c6c524d0617f08d0328e622d2c9aa02233cf964c98c5cf600ef0a701"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn-mihomo/components",
+      "repo_path": "extra-vpn-mihomo-meta/components",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 55,
+      "sha256": "a9e9b7df434a49c01423c6fa237a3ec557e78230a08e9fad05066569bfd892ef"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn-mihomo/hooks",
+      "repo_path": "extra-vpn-mihomo-meta/hooks",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn-mihomo/hooks/link",
+      "repo_path": "extra-vpn-mihomo-meta/hooks/link",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1629,
+      "sha256": "44c780529fbae7b3bdb55fff934755f28ad9ac3bd9335000da0e9e7ff8b89f9a"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn-mihomo/hooks/unlink",
+      "repo_path": "extra-vpn-mihomo-meta/hooks/unlink",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 573,
+      "sha256": "df6fe8cc757732b683f482b96edce979568dc1a8e9427ebe35b63164d7f8f5ba"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn-mihomo/manifest",
+      "repo_path": "extra-vpn-mihomo-meta/manifest",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 807,
+      "sha256": "121bf58e63b0d573f96fe839ada8521970de1effd1db76090cb97fa168aded15"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn-mihomo/name",
+      "repo_path": "extra-vpn-mihomo-meta/name",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 11,
+      "sha256": "a204e05177ffcc0666087837dc6bcafed8f43dd7065025db524557cf5ed0f0e3"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn-mihomo/release",
+      "repo_path": "extra-vpn-mihomo-meta/release",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 7,
+      "sha256": "375065d2c6c524d0617f08d0328e622d2c9aa02233cf964c98c5cf600ef0a701"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn-mihomo/requires",
+      "repo_path": "extra-vpn-mihomo-meta/requires",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 24,
+      "sha256": "6b472b532fe05294cdd85996532a743c68e3ddcb176456827426ff557ab4d88b"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/VERSION",
+      "repo_path": "extra-vpn/VERSION",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 7,
+      "sha256": "375065d2c6c524d0617f08d0328e622d2c9aa02233cf964c98c5cf600ef0a701"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/bin",
+      "repo_path": "extra-vpn/bin",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/bin/mu300-vpn",
+      "repo_path": "extra-vpn/bin/mu300-vpn",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 160823,
+      "sha256": "73681cbba7e068da83ae4a2b4d4c025416f580c54e8ee4859291c50a4e4b558c"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/components",
+      "repo_path": "extra-vpn/components",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 23,
+      "sha256": "5920292de90a3ef97acd9cdc16770bf7da7e6e5fe6fe55d5d1edf35909fee8f1"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/etc",
+      "repo_path": "extra-vpn/etc",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/etc/vpn.conf.example",
+      "repo_path": "extra-vpn/etc/vpn.conf.example",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 2384,
+      "sha256": "9c1a02349b335f9b81705be72b3a53d3c09c7f8089dd7461fd60078d58e5fbe6"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/hooks",
+      "repo_path": "extra-vpn/hooks",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/hooks/link",
+      "repo_path": "extra-vpn/hooks/link",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 7096,
+      "sha256": "cb6041a974005f9195ac11d5fb96eae71b6cebb43a06d7bebb8b787d13c7b307"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/hooks/unlink",
+      "repo_path": "extra-vpn/hooks/unlink",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3933,
+      "sha256": "7a3ed45e30ab6ec693ef8c8afa7d330f609122fdaea29f6d139604328792e59c"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/install.sh",
+      "repo_path": "extra-vpn/install.sh",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3302,
+      "sha256": "3e55c81417370e834a811b4ff6ddb4d9092289948da2c6df1238be144b509dfa"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/lib",
+      "repo_path": "extra-vpn/lib",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/lib/vpn",
+      "repo_path": "extra-vpn/lib/vpn",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/lib/vpn/dae.sh",
+      "repo_path": "extra-vpn/lib/vpn/dae.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 24947,
+      "sha256": "082f26c892d812160b38b0b92c1a7bf043be7e9a71c36ae5c91bdf8255602306"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/lib/vpn/mihomo.sh",
+      "repo_path": "extra-vpn/lib/vpn/mihomo.sh",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 32994,
+      "sha256": "34c7106942966058e572f055444242d4a7759a3fc7c35625df87cbef85e617f0"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/lib/vpn/openvpn-up",
+      "repo_path": "extra-vpn/lib/vpn/openvpn-up",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3146,
+      "sha256": "f79ce05361bebf68121fb31bcec38358447e0561dd7f64b74ac39f1b74b75c34"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/lib/vpn/openvpn.sh",
+      "repo_path": "extra-vpn/lib/vpn/openvpn.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 32386,
+      "sha256": "500d4b652f14d236a2721ffa5a7351e4e0a5cd0682e3f163bc77113880b5242a"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/lib/vpn/sing-box.sh",
+      "repo_path": "extra-vpn/lib/vpn/sing-box.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 20426,
+      "sha256": "f9e81275223b67f38b744c84e8a651653c492891fed6b0cfbb76e4a4ddca3cc5"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/lib/vpn/uri.sh",
+      "repo_path": "extra-vpn/lib/vpn/uri.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 29866,
+      "sha256": "b7ce7bd127ed177fbcb2a08862af60547e21962e5c9d3ae78b50800a19a168a3"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/lib/vpn/wireguard.sh",
+      "repo_path": "extra-vpn/lib/vpn/wireguard.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 13231,
+      "sha256": "645476c4c5922197509bc8cbfdf5d391a0e6496fca1686648d67e0b1c8d6438a"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/lib/vpn/xray.sh",
+      "repo_path": "extra-vpn/lib/vpn/xray.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 39930,
+      "sha256": "74b102d5d97d0be052f2c66cbec257715951a24aa5ba07bfd0cb0567b1e2701c"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/manifest",
+      "repo_path": "extra-vpn/manifest",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1902,
+      "sha256": "309a4c754b003231435d2e7c6dfd52868c604a591da37ce82a43cc6744160507"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/name",
+      "repo_path": "extra-vpn/name",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4,
+      "sha256": "e5b0e11268a07621574991bbfeafc96057548ffd248126d5b8ef94489a705663"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/release",
+      "repo_path": "extra-vpn/release",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 7,
+      "sha256": "375065d2c6c524d0617f08d0328e622d2c9aa02233cf964c98c5cf600ef0a701"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/requires",
+      "repo_path": "extra-vpn/requires",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 24,
+      "sha256": "6b472b532fe05294cdd85996532a743c68e3ddcb176456827426ff557ab4d88b"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/service",
+      "repo_path": "extra-vpn/service",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/service/procd",
+      "repo_path": "extra-vpn/service/procd",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/service/procd/mu300-vpn",
+      "repo_path": "extra-vpn/service/procd/mu300-vpn",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 720,
+      "sha256": "e47780c36ff5f75ef3ca348720d4f5b0c2fec9e3f040b5ab9f8d74230ef7fe40"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/service/systemd",
+      "repo_path": "extra-vpn/service/systemd",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/service/systemd/mu300-vpn-subscriptions.service",
+      "repo_path": "extra-vpn/service/systemd/mu300-vpn-subscriptions.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 248,
+      "sha256": "660c2a77ad9fc29b156ce41b0af2ab031dfd6f5d5c7067328c484e31385bf92e"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/service/systemd/mu300-vpn-subscriptions.timer",
+      "repo_path": "extra-vpn/service/systemd/mu300-vpn-subscriptions.timer",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 179,
+      "sha256": "391a31616e49fbbb0d0ace1d8bfde0aeb4033ebaa7ab60518f335066ea06edfb"
+    },
+    {
+      "device_path": "/mnt/mu300-disk/extra/vpn/service/systemd/mu300-vpn.service",
+      "repo_path": "extra-vpn/service/systemd/mu300-vpn.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 909,
+      "sha256": "3b168381c413d388ed06266e8dd6d446cd495a9ec70f48ad2f611c92aa5cfc2c"
+    },
+    {
+      "device_path": "/opt/mu300/bin",
+      "repo_path": "opt-mu300/bin",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/opt/mu300/bin/adbd",
+      "repo_path": "opt-mu300/bin/adbd",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 2493480,
+      "sha256": "1f59cf46c6e2d595128e78c8834ad861d78f1087663a64851a6e010167fd2f8b"
+    },
+    {
+      "device_path": "/opt/mu300/bin/android-gpu-run",
+      "repo_path": "opt-mu300/bin/android-gpu-run",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 673,
+      "sha256": "6a85e1e48146bbb4231d04c2c5c0b08f2584f52f751ba30f0bd4936773d6f51e"
+    },
+    {
+      "device_path": "/opt/mu300/bin/android-run",
+      "repo_path": "opt-mu300/bin/android-run",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3261,
+      "sha256": "249049741340410afbbf189128f5d5840d9d1f8cf51d9d30446a320b1405f5fa"
+    },
+    {
+      "device_path": "/opt/mu300/bin/android-vendor-start",
+      "repo_path": "opt-mu300/bin/android-vendor-start",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 10260,
+      "sha256": "2603b7db99b5847b9eab6b8e0b804906f1ae04ba3ae4912c9199450e5d0b76ea"
+    },
+    {
+      "device_path": "/opt/mu300/bin/bluetooth-start",
+      "repo_path": "opt-mu300/bin/bluetooth-start",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1792,
+      "sha256": "04800e2ae62d5cc857f623fddf7e0c4a5a1b953691e0ec1dbfb7ebf4767c95e1"
+    },
+    {
+      "device_path": "/opt/mu300/bin/bootmark",
+      "repo_path": "opt-mu300/bin/bootmark",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 820,
+      "sha256": "006bc252b614b4093dead9678954e8012d9ad1890185aac4316157eaf83b4178"
+    },
+    {
+      "device_path": "/opt/mu300/bin/early-recorder",
+      "repo_path": "opt-mu300/bin/early-recorder",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 5469,
+      "sha256": "f06e3294222a97674abb3da00689ab22442422aedd7c515c6870632287c6d971"
+    },
+    {
+      "device_path": "/opt/mu300/bin/extra-modules",
+      "repo_path": "opt-mu300/bin/extra-modules",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4655,
+      "sha256": "d0e56d5833133d3a0f681d2b946339a9dc7108f12879ff11d0cd30a378ab6a56"
+    },
+    {
+      "device_path": "/opt/mu300/bin/hotspot-start",
+      "repo_path": "opt-mu300/bin/hotspot-start",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 6907,
+      "sha256": "3640fa47fb0e2080479abf5d4d66253f06e59190107d774b9ff2b8bcbb5e7e29"
+    },
+    {
+      "device_path": "/opt/mu300/bin/hotspot-stop",
+      "repo_path": "opt-mu300/bin/hotspot-stop",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 54,
+      "sha256": "a1ba36b700f1666d5e57a2f83312c4cb18d161577b2d96269edc08d2186eb21c"
+    },
+    {
+      "device_path": "/opt/mu300/bin/hotspot-verify",
+      "repo_path": "opt-mu300/bin/hotspot-verify",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1518,
+      "sha256": "80e80c4deeb42ec4cab904df95f9284e1d08e70ff1cba43f43b60418858106ce"
+    },
+    {
+      "device_path": "/opt/mu300/bin/kmsg-forward",
+      "repo_path": "opt-mu300/bin/kmsg-forward",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1505,
+      "sha256": "788fb544fcef362488c08a5863cad6accfe8c2bb3a7ae21cd1e17442bcd50f7e"
+    },
+    {
+      "device_path": "/opt/mu300/bin/lan-start",
+      "repo_path": "opt-mu300/bin/lan-start",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3495,
+      "sha256": "14f91473f1cb7b8239e10d6b914dcba28d39c4a7f39295b6593ee1fe91944f90"
+    },
+    {
+      "device_path": "/opt/mu300/bin/logdw",
+      "repo_path": "opt-mu300/bin/logdw",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 618728,
+      "sha256": "cf62d57455c7d6e2256e6ca313e53ae8bb0f91796262dc2bdec1c9202b7c83c4"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mobile-data",
+      "repo_path": "opt-mu300/bin/mobile-data",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 119084,
+      "sha256": "5c16898539eb7f280967a0dc7d0394902a4ed67420f4072181884236c98030af"
+    },
+    {
+      "device_path": "/opt/mu300/bin/modem-log-drain",
+      "repo_path": "opt-mu300/bin/modem-log-drain",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1243,
+      "sha256": "6c36deeb201ad8e4008853a8924ef47e99d02f7319382038dac0ac9a14f45dd5"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-adbd",
+      "repo_path": "opt-mu300/bin/mu300-adbd",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 15975,
+      "sha256": "b08fabed6862a0f478b9c39dac4d2fb5a49afd0ca854dd2bfe08f35065321ac9"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-api",
+      "repo_path": "opt-mu300/bin/mu300-api",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 96993,
+      "sha256": "38d8e2b99ac56932cf723725fe32fe42484c6cc73312c53439fee849abed68e8"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-at",
+      "repo_path": "opt-mu300/bin/mu300-at",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 15338,
+      "sha256": "de903956c3e86b4d88281bba2d4c985cad7832b85117710b715d6633f79f819d"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-atd",
+      "repo_path": "opt-mu300/bin/mu300-atd",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 24881,
+      "sha256": "eb167661ba291e4894cc25c0f8f199a6fa0772e14b4e936915491e2fcb1733b8"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-backup",
+      "repo_path": "opt-mu300/bin/mu300-backup",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 51922,
+      "sha256": "ed98ca7cb7e9162312df2255a499b7009c53a86c34acb6672d9cc68603f59da8"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-bt-init",
+      "repo_path": "opt-mu300/bin/mu300-bt-init",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 693912,
+      "sha256": "64317005738dd8710690362465585fa7e2f9e77904cac06a38aa5c88896e3360"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-buttons",
+      "repo_path": "opt-mu300/bin/mu300-buttons",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 7926,
+      "sha256": "007b20ba539cbce1b18631dace58e946feca6a59839f3dd86d7fe39ed4e1f8b0"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-carry",
+      "repo_path": "opt-mu300/bin/mu300-carry",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 713640,
+      "sha256": "48c65c509e28111aa924edc89e491b0b33b12ed51907fc054cb8623179aefad6"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-cmt-spool",
+      "repo_path": "opt-mu300/bin/mu300-cmt-spool",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3749,
+      "sha256": "ac8572d440dbcacdf504f3e0407393f57d08624dd5af489f62610ded7e290cd3"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-cpu",
+      "repo_path": "opt-mu300/bin/mu300-cpu",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 31475,
+      "sha256": "8d0499bef27b8ee35c29bcb5d04b83742ec7bdd6b3deff44fc0771ebdceda977"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-device",
+      "repo_path": "opt-mu300/bin/mu300-device",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3734,
+      "sha256": "e79b8906e44dd75b37b91416cf55e8ffe3e63ad4e52404bf19cf25598a0f9427"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-extra",
+      "repo_path": "opt-mu300/bin/mu300-extra",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 28318,
+      "sha256": "ae31686d79ed93e5642a6ab789db516bc2dda3730e8db4b928a7116d88562a41"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-ipa-dump",
+      "repo_path": "opt-mu300/bin/mu300-ipa-dump",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 6145,
+      "sha256": "041f1dae23628e6e5943b5e201cb33010ceb79af8763db41a85dbad14a06e8b2"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-keys",
+      "repo_path": "opt-mu300/bin/mu300-keys",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 627144,
+      "sha256": "05672a4ed2e757a4e96caff34b83fd4f90edc9962aa12338c16dca204ba5c8b0"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-lan-ip",
+      "repo_path": "opt-mu300/bin/mu300-lan-ip",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 393,
+      "sha256": "6c34e1ecd234577c7f7f52a27684f351afaf56bf60eea87afbe1e7f559fc0c2e"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-led",
+      "repo_path": "opt-mu300/bin/mu300-led",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 33858,
+      "sha256": "71ffb65f60d4bdd67b01ff87bf5834f14659352e6eafcea0ec11b215cecf5185"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-mihomo",
+      "repo_path": "opt-mu300/bin/mu300-mihomo",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 7577,
+      "sha256": "a565cc42611485b84ca6b75c74e83a836bd512a5b99fcecdf1b7f231b7e51b65"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-modem-coldboot",
+      "repo_path": "opt-mu300/bin/mu300-modem-coldboot",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4456,
+      "sha256": "2039b1f5a74e9c0cd69b93edf2ca476d8207a7df0ee99382e03f55ae1c510ade"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-modprobe-guard",
+      "repo_path": "opt-mu300/bin/mu300-modprobe-guard",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 7187,
+      "sha256": "a0ee602cff29c892bbb4a80838c56c93d2155e3847d652551cbeebb5bdf7505b"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-next-boot",
+      "repo_path": "opt-mu300/bin/mu300-next-boot",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 14020,
+      "sha256": "1de4169dd3535b57d5dd384baecb27c72ad03a5f2c4475ae96912f500c2c75c7"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-nfc",
+      "repo_path": "opt-mu300/bin/mu300-nfc",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 13403,
+      "sha256": "7fa4ca7b058e1074e7b2dbad0df192fc5a74b0a6a11577f00f6c76ebe32d9ba8"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-os",
+      "repo_path": "opt-mu300/bin/mu300-os",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3270,
+      "sha256": "c527a9d7a8862c73d1190c2f2b0797a886b2bb1dae7e3f42a70dd99d9ff3709b"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-power",
+      "repo_path": "opt-mu300/bin/mu300-power",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 52943,
+      "sha256": "bc4ac598960354077b43c563d3ef2d6e01ca1ebc85a3645943426a1edaa95732"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-sim",
+      "repo_path": "opt-mu300/bin/mu300-sim",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 16217,
+      "sha256": "dd892e3a6e2dc494d3bf74269cfe4f3672cb8f7bc8f351e4ae92422aa25fa886"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-sim-radio",
+      "repo_path": "opt-mu300/bin/mu300-sim-radio",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 6256,
+      "sha256": "c2ad95c4b70924cf907564a2c9e2cc50ecd5bdf27a1586f829e825dc5bacb74a"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-sim-state",
+      "repo_path": "opt-mu300/bin/mu300-sim-state",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 6324,
+      "sha256": "4549a18a1bad1d2fc088b19bac5f77fb93f2704350b2adb236e9ed26cdbe7d48"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-sim-u30",
+      "repo_path": "opt-mu300/bin/mu300-sim-u30",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 25226,
+      "sha256": "7a04a7948bb7f881d3e912760a2051462af8201313758a73eb4567dfd0af1062"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-sim2-start",
+      "repo_path": "opt-mu300/bin/mu300-sim2-start",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 10913,
+      "sha256": "4b8d602276384162be74a13dbbe6186703c03390b8ce6202323ba0a1cc7710f5"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-sim2-warmup",
+      "repo_path": "opt-mu300/bin/mu300-sim2-warmup",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 9944,
+      "sha256": "227f2b32949af1886da8f2081cf51eed5471b599999300a544741d14fc956de7"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-sms-forward",
+      "repo_path": "opt-mu300/bin/mu300-sms-forward",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 41154,
+      "sha256": "126936f28cb621b3394a9c2c31d13618aa3b46e8c641e304db39505ea81749ef"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-sqc-charge",
+      "repo_path": "opt-mu300/bin/mu300-sqc-charge",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 6046,
+      "sha256": "f3f572dd2d8bf4b46940558c2ca386804877c2a662144fb88e70c7c28721f772"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-tcp",
+      "repo_path": "opt-mu300/bin/mu300-tcp",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 5906,
+      "sha256": "a1a945aedcf660937e63c71a227293be40be34ac06fc38cc7365353f2af0f3f4"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-toolkit",
+      "repo_path": "opt-mu300/bin/mu300-toolkit",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 58062,
+      "sha256": "7159866827ebe3425b1e83b40d7ffa03b2ffdbba3217a4b50a0ea127844d3b7d"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-traffic",
+      "repo_path": "opt-mu300/bin/mu300-traffic",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 32889,
+      "sha256": "18b12239efe1edcf8d8c6ecc1998fb552df050ea7592383a8901a151edc02e99"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-ttl",
+      "repo_path": "opt-mu300/bin/mu300-ttl",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 8438,
+      "sha256": "7b2603c315cb0a9fd2d75f9e2daad0f5805057a69221dd3a8dd1fc61979fffb3"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-update",
+      "repo_path": "opt-mu300/bin/mu300-update",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 285708,
+      "sha256": "8f08b574183eb27c29516cd2a3705776ab40cd213c0035cb5a6584dc1b23b1b7"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-usb",
+      "repo_path": "opt-mu300/bin/mu300-usb",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 23568,
+      "sha256": "7446a35e1377deb29bc110ba80b18ecdfe16b3fb9b5fe1f0b9cb102bae830cea"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-usb-reset",
+      "repo_path": "opt-mu300/bin/mu300-usb-reset",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4000,
+      "sha256": "9703435052d0c53ea041431530797f1e9ddcdb055765e5c316784c2661c14bcd"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-user-packages",
+      "repo_path": "opt-mu300/bin/mu300-user-packages",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 24611,
+      "sha256": "720312a08445e8f38ed5db4fc0141b5bf817779b5d3bf1f84ca4fb16063ee89d"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-ussd",
+      "repo_path": "opt-mu300/bin/mu300-ussd",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4124,
+      "sha256": "5f49c4011abe4ad4124505a465699217bf313981bdf9b820b9c4198538318d25"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-vpn",
+      "repo_path": "opt-mu300/bin/mu300-vpn",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/mnt/mu300-disk/extra/vpn/bin/mu300-vpn"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-vpn-uplink",
+      "repo_path": "opt-mu300/bin/mu300-vpn-uplink",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3587,
+      "sha256": "60a78398722a492632fcbfaefd41065ae0e8737a2d6360718adfccf882fd50e8"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-wifi-band",
+      "repo_path": "opt-mu300/bin/mu300-wifi-band",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3220,
+      "sha256": "9e48c4a1dcbafefde66f4899d0be95d88a7193d0566550131d07c30fe2f25ca7"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-zram",
+      "repo_path": "opt-mu300/bin/mu300-zram",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 6707,
+      "sha256": "d72fd418069f3d968a06f234e799d3dcbd7f0742d5958a9889596f571292e06b"
+    },
+    {
+      "device_path": "/opt/mu300/bin/openwrt-wifi-config",
+      "repo_path": "opt-mu300/bin/openwrt-wifi-config",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4314,
+      "sha256": "a903b50e7c17bbe10ac2178232e11f24d120fa6f13feb5b7ce755b377e16fff8"
+    },
+    {
+      "device_path": "/opt/mu300/bin/openwrt-wifi-wpa2-only",
+      "repo_path": "opt-mu300/bin/openwrt-wifi-wpa2-only",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4816,
+      "sha256": "13021ba3a95f544cfa38347d87f96aeab269e0bc3c8792041693aa3b055ad11d"
+    },
+    {
+      "device_path": "/opt/mu300/bin/regdb-load",
+      "repo_path": "opt-mu300/bin/regdb-load",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1110,
+      "sha256": "c5ede8dcf326bcb9231e5eabfe08ec304a573b76137b0b788b22ba3a358fa437"
+    },
+    {
+      "device_path": "/opt/mu300/bin/rootfs-fixups",
+      "repo_path": "opt-mu300/bin/rootfs-fixups",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 932,
+      "sha256": "14c79136f44ef4ad9cc69401441f27d40282b1f97ecebc84a6cffdbbbf7670db"
+    },
+    {
+      "device_path": "/opt/mu300/bin/sipa-dele-start",
+      "repo_path": "opt-mu300/bin/sipa-dele-start",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 6093,
+      "sha256": "33339bf978d0cf09f348097cf5ee058d817c990ced69bde68c0ffd61cde28227"
+    },
+    {
+      "device_path": "/opt/mu300/bin/sms",
+      "repo_path": "opt-mu300/bin/sms",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 16880,
+      "sha256": "bdd3fe96ab4abf1927b7a9d17609426948dbe7904b33694b009b6c452ed82394"
+    },
+    {
+      "device_path": "/opt/mu300/bin/thermal-guard",
+      "repo_path": "opt-mu300/bin/thermal-guard",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 11946,
+      "sha256": "1c4ddb8a67d30c32653b7083ea84a99a9761344d0cc31b481647e638df22df63"
+    },
+    {
+      "device_path": "/opt/mu300/bin/u30air-wait-uplink",
+      "repo_path": "opt-mu300/bin/u30air-wait-uplink",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4532,
+      "sha256": "1c270c8a37f1e030db4d6af40aaa31909677a054da9b88f41237d6b4fe140dbd"
+    },
+    {
+      "device_path": "/opt/mu300/bin/ueventd-perms.sh",
+      "repo_path": "opt-mu300/bin/ueventd-perms.sh",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 52326,
+      "sha256": "757b2a1c2a70f753a7a62c31983f16fab250b5be7f0526afa9edcc1c2838845d"
+    },
+    {
+      "device_path": "/opt/mu300/bin/wcn-reopen",
+      "repo_path": "opt-mu300/bin/wcn-reopen",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1307,
+      "sha256": "04962d2c7152f1925e932bd44db7019681de8e49edfbc953256aa53c17241b63"
+    },
+    {
+      "device_path": "/opt/mu300/bin/wifi-client",
+      "repo_path": "opt-mu300/bin/wifi-client",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 55926,
+      "sha256": "ce29c211e9daf90f91d4056bb26bfefd0d4f51c19fd9ee2baf9ed4b753f4743d"
+    },
+    {
+      "device_path": "/opt/mu300/bin/wifi-start",
+      "repo_path": "opt-mu300/bin/wifi-start",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1424,
+      "sha256": "596aa93d08deb80a5a6c2fc3055453ee06370f459738027cf4c1e84ca104349a"
+    },
+    {
+      "device_path": "/opt/mu300/bin/zram-start",
+      "repo_path": "opt-mu300/bin/zram-start",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 146,
+      "sha256": "7406f8202015eef8a86dc26003f14b1ffa111d80b3f31ad607dc766fe72ba4ea"
+    },
+    {
+      "device_path": "/opt/mu300/lib",
+      "repo_path": "opt-mu300/lib",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/opt/mu300/lib/autoload-blocked",
+      "repo_path": "opt-mu300/lib/autoload-blocked",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 2331,
+      "sha256": "270904622c7eab983c4280565c54234be793ff2a053d1954c070c28ff3500483"
+    },
+    {
+      "device_path": "/opt/mu300/lib/cpu-voltage-warning.txt",
+      "repo_path": "opt-mu300/lib/cpu-voltage-warning.txt",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 817,
+      "sha256": "362bd35f089efbea054c8b94bf95afea18ccdf0c668af39df5d3e65c0c68f10e"
+    },
+    {
+      "device_path": "/opt/mu300/lib/hotspot-ap.sh",
+      "repo_path": "opt-mu300/lib/hotspot-ap.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 5155,
+      "sha256": "a5f26bf3d1ffc8c8a883363194edab0bc79f523d9104eebbafdd82db76a523c7"
+    },
+    {
+      "device_path": "/opt/mu300/lib/image-manifests",
+      "repo_path": "opt-mu300/lib/image-manifests",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "dir"
+    },
+    {
+      "device_path": "/opt/mu300/lib/image-manifests/ubuntu-24.04.gz",
+      "repo_path": "opt-mu300/lib/image-manifests/ubuntu-24.04.gz",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 479913,
+      "sha256": "6bbe9b0b7410018aefe4076978e65850f93afe8dea786d4379181d19d00d6b9c"
+    },
+    {
+      "device_path": "/opt/mu300/lib/image-manifests/ubuntu-26.04.gz",
+      "repo_path": "opt-mu300/lib/image-manifests/ubuntu-26.04.gz",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 598542,
+      "sha256": "c4f33c4234150f254c89d0aa6ba251e4f3b5a89f3d924e0f852b42a03ddc421b"
+    },
+    {
+      "device_path": "/opt/mu300/lib/json.awk",
+      "repo_path": "opt-mu300/lib/json.awk",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 9271,
+      "sha256": "33281fc44d1910e42bcdf09ae515bca5da469d9e1f7f9a0f65b597fa93690e16"
+    },
+    {
+      "device_path": "/opt/mu300/lib/path-commands",
+      "repo_path": "opt-mu300/lib/path-commands",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 323,
+      "sha256": "081828a6b7bd16ac15390f093670cb694b64da44545a12bd26fc43a6438cd454"
+    },
+    {
+      "device_path": "/opt/mu300/lib/release.pub",
+      "repo_path": "opt-mu300/lib/release.pub",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 100,
+      "sha256": "d13eb68b5ecc0265d36ae4e1903f1d9db70a51843032385fc7f77525244e8cdd"
+    },
+    {
+      "device_path": "/opt/mu300/lib/run-dir.sh",
+      "repo_path": "opt-mu300/lib/run-dir.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 4069,
+      "sha256": "ff9a30a8902e01ebd38e71b977cf0b304e28eb122e1df360040ee3e5b0256613"
+    },
+    {
+      "device_path": "/opt/mu300/lib/sim-config.sh",
+      "repo_path": "opt-mu300/lib/sim-config.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 9476,
+      "sha256": "8c1f4420954ea811dbf4e7a4d4b3051d6dcba6ffa6df6130f626709f00920aaa"
+    },
+    {
+      "device_path": "/opt/mu300/lib/sms-forward-http.sh",
+      "repo_path": "opt-mu300/lib/sms-forward-http.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3625,
+      "sha256": "84188afeaf3c1b62850fd0ac4b80191ea00bcbac59845e4301e11f9940fedeb1"
+    },
+    {
+      "device_path": "/opt/mu300/lib/sms-pdu.awk",
+      "repo_path": "opt-mu300/lib/sms-pdu.awk",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 19619,
+      "sha256": "50f3e461a1c3bae04d528376a381843f8d775f6bb5aa20c7395385147759059b"
+    },
+    {
+      "device_path": "/opt/mu300/lib/v50-card.sh",
+      "repo_path": "opt-mu300/lib/v50-card.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3180,
+      "sha256": "419bebca049916a890e407c0830f1a0214728173388eddc1ada90aa1dbccf770"
+    },
+    {
+      "device_path": "/opt/mu300/lib/vpn",
+      "repo_path": "opt-mu300/lib/vpn",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/mnt/mu300-disk/extra/vpn/lib/vpn"
+    },
+    {
+      "device_path": "/opt/mu300/lib/vpn-orphan.sh",
+      "repo_path": "opt-mu300/lib/vpn-orphan.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3374,
+      "sha256": "9c03c421e87aaf85e3f4abae9b32144e60a3a882c8a0676b85fb90b21af4dda8"
+    },
+    {
+      "device_path": "/opt/mu300/lib/wifi-channels.sh",
+      "repo_path": "opt-mu300/lib/wifi-channels.sh",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3741,
+      "sha256": "7b4fb3f43d2a73ab6056cc3f11f7a047e84ddb17cbfd54098d48b6f694c28f8a"
+    },
+    {
+      "device_path": "/opt/mu300/lib/zram.conf.example",
+      "repo_path": "opt-mu300/lib/zram.conf.example",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 1399,
+      "sha256": "cd9be19764e8d1c8edc3904d4d799472d983d2cffe0e57752e97df6965a674bb"
+    },
+    {
+      "device_path": "/usr/local/bin/mihomo",
+      "repo_path": "usr-local-bin/mihomo",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/mnt/mu300-disk/extra/vpn-mihomo/bin/mihomo"
+    },
+    {
+      "device_path": "/usr/local/bin/mobile-data",
+      "repo_path": "usr-local-bin/mobile-data",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mobile-data"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-api",
+      "repo_path": "usr-local-bin/mu300-api",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-api"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-at",
+      "repo_path": "usr-local-bin/mu300-at",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-at"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-backup",
+      "repo_path": "usr-local-bin/mu300-backup",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-backup"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-cpu",
+      "repo_path": "usr-local-bin/mu300-cpu",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-cpu"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-device",
+      "repo_path": "usr-local-bin/mu300-device",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-device"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-extra",
+      "repo_path": "usr-local-bin/mu300-extra",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-extra"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-led",
+      "repo_path": "usr-local-bin/mu300-led",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-led"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-mihomo",
+      "repo_path": "usr-local-bin/mu300-mihomo",
+      "mode": "0o755",
+      "uid": 1000,
+      "gid": 1000,
+      "type": "file",
+      "size": 7577,
+      "sha256": "a565cc42611485b84ca6b75c74e83a836bd512a5b99fcecdf1b7f231b7e51b65"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-next-boot",
+      "repo_path": "usr-local-bin/mu300-next-boot",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-next-boot"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-nfc",
+      "repo_path": "usr-local-bin/mu300-nfc",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-nfc"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-os",
+      "repo_path": "usr-local-bin/mu300-os",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-os"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-power",
+      "repo_path": "usr-local-bin/mu300-power",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-power"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-sim",
+      "repo_path": "usr-local-bin/mu300-sim",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-sim"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-sim-radio",
+      "repo_path": "usr-local-bin/mu300-sim-radio",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-sim-radio"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-sim-state",
+      "repo_path": "usr-local-bin/mu300-sim-state",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-sim-state"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-tcp",
+      "repo_path": "usr-local-bin/mu300-tcp",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-tcp"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-toolkit",
+      "repo_path": "usr-local-bin/mu300-toolkit",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-toolkit"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-traffic",
+      "repo_path": "usr-local-bin/mu300-traffic",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-traffic"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-ttl",
+      "repo_path": "usr-local-bin/mu300-ttl",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-ttl"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-update",
+      "repo_path": "usr-local-bin/mu300-update",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-update"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-usb",
+      "repo_path": "usr-local-bin/mu300-usb",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-usb"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-user-packages",
+      "repo_path": "usr-local-bin/mu300-user-packages",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-user-packages"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-ussd",
+      "repo_path": "usr-local-bin/mu300-ussd",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-ussd"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-vpn",
+      "repo_path": "usr-local-bin/mu300-vpn",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/mnt/mu300-disk/extra/vpn/bin/mu300-vpn"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-wifi-band",
+      "repo_path": "usr-local-bin/mu300-wifi-band",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-wifi-band"
+    },
+    {
+      "device_path": "/usr/local/bin/mu300-zram",
+      "repo_path": "usr-local-bin/mu300-zram",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/mu300-zram"
+    },
+    {
+      "device_path": "/usr/local/bin/sms",
+      "repo_path": "usr-local-bin/sms",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/sms"
+    },
+    {
+      "device_path": "/usr/local/bin/wifi-client",
+      "repo_path": "usr-local-bin/wifi-client",
+      "mode": "0o777",
+      "uid": 0,
+      "gid": 0,
+      "type": "symlink",
+      "linkname": "/opt/mu300/bin/wifi-client"
+    }
+  ]
+}

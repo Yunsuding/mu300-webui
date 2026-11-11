@@ -1,0 +1,216 @@
+#!/usr/bin/python3
+"""Root-only, narrow WebUI adapter for mihomo's private Unix controller.
+
+Only group names, node names/types and latency are returned. No HTTP controller,
+arbitrary request URL, configuration export or credential is exposed to the panel.
+Selections are stored per profile and restored when that profile starts again.
+"""
+import fcntl
+import http.client
+import json
+import os
+from pathlib import Path
+import re
+import socket
+import sys
+import tempfile
+import time
+from urllib.parse import quote, urlencode
+
+STORE = Path('/etc/mu300/vpn')
+RUN = Path('/run/mu300-vpn')
+SOCKET = RUN / 'mihomo-control.sock'
+TEST_URL = 'https://www.gstatic.com/generate_204'
+
+
+class Refused(Exception):
+    pass
+
+
+def valid_id(value):
+    return isinstance(value, str) and re.fullmatch(r'[a-z0-9][a-z0-9-]{0,31}', value)
+
+
+def name(value):
+    if (not isinstance(value, str) or not value or len(value.encode()) > 512
+            or any(ord(c) < 32 or ord(c) == 127 for c in value)):
+        raise Refused('Invalid group or node name')
+    return value
+
+
+def current(profile):
+    if not valid_id(profile):
+        raise Refused('Invalid profile')
+    try:
+        active = (STORE / 'active').read_text().strip()
+        running = (RUN / 'mihomo-profile').read_text().strip()
+    except OSError:
+        raise Refused('mihomo is not ready; enable the VPN and try again')
+    if active != profile or running != profile:
+        raise Refused('The active subscription changed; refresh the node list')
+
+
+class UnixHTTP(http.client.HTTPConnection):
+    def connect(self):
+        self.sock = socket.socket(socket.AF_UNIX, socket.SOCK_STREAM)
+        self.sock.settimeout(self.timeout)
+        self.sock.connect(str(SOCKET))
+
+
+def request(profile, method, path, body=None):
+    conn = UnixHTTP('localhost', timeout=7)
+    try:
+        conn.connect()
+        # Bind the request to this engine instance before checking the profile.
+        current(profile)
+        payload = None if body is None else json.dumps(body).encode()
+        conn.request(method, path, payload, {'Content-Type': 'application/json'})
+        response = conn.getresponse()
+        data = response.read(1048577)
+        if len(data) > 1048576:
+            raise Refused('Unexpected controller response')
+        if response.status not in (200, 204):
+            raise Refused('Node did not answer the HTTPS latency test' if '/delay?' in path
+                          else 'mihomo refused the operation; refresh and try again')
+        return json.loads(data) if data else {}
+    finally:
+        conn.close()
+
+
+def proxies(profile):
+    return request(profile, 'GET', '/proxies').get('proxies', {})
+
+
+def member(data, group, node):
+    group = name(group)
+    node = name(node)
+    obj = data.get(group, {})
+    if obj.get('type') != 'Selector' or node not in obj.get('all', []):
+        raise Refused('Choose a node from this subscription and group')
+    return group, node
+
+
+def snapshot(profile):
+    data = proxies(profile)
+    groups = []
+    for group, obj in data.items():
+        if obj.get('type') != 'Selector' or group == 'GLOBAL':
+            continue
+        nodes = []
+        for node in obj.get('all', []):
+            info = data.get(node, {})
+            history = info.get('history') or []
+            last = history[-1] if history else {}
+            delay = last.get('delay')
+            nodes.append({'name': node, 'type': info.get('type', ''),
+                          'delay': delay if isinstance(delay, int) and delay > 0 else None,
+                          'tested': bool(history), 'time': last.get('time')})
+        groups.append({'name': group, 'selected': obj.get('now'), 'nodes': nodes})
+    current(profile)
+    return {'ok': 1, 'id': profile, 'groups': groups}
+
+
+def selection_path(profile):
+    if not valid_id(profile):
+        raise Refused('Invalid profile')
+    path = STORE / 'profiles' / profile
+    if not path.is_dir():
+        raise Refused('Profile no longer exists')
+    return path / 'panel-selection.json'
+
+
+def read_selection(profile):
+    try:
+        value = json.loads(selection_path(profile).read_text())
+        return value if isinstance(value, dict) else {}
+    except (OSError, ValueError):
+        return {}
+
+
+def save_selection(profile, group, node):
+    path = selection_path(profile)
+    value = read_selection(profile)
+    value[group] = node
+    fd, tmp = tempfile.mkstemp(prefix='.panel-selection-', dir=str(path.parent))
+    try:
+        with os.fdopen(fd, 'w') as f:
+            json.dump(value, f, ensure_ascii=False)
+            f.flush()
+            os.fsync(f.fileno())
+        os.replace(tmp, path)
+    finally:
+        if os.path.exists(tmp):
+            os.unlink(tmp)
+
+
+def choose(profile, group, node):
+    # Serialize per-profile selection read/modify/write, without blocking latency tests.
+    with (RUN / 'panel-selection.lock').open('a') as lock:
+        fcntl.flock(lock, fcntl.LOCK_EX)
+        group, node = member(proxies(profile), group, node)
+        request(profile, 'PUT', '/proxies/' + quote(group, safe=''), {'name': node})
+        current(profile)
+        save_selection(profile, group, node)
+        return snapshot(profile)
+
+
+def latency(profile, group, node):
+    group, node = member(proxies(profile), group, node)
+    query = urlencode({'url': TEST_URL, 'timeout': 4000, 'expected': '204'})
+    try:
+        result = request(profile, 'GET', '/proxies/' + quote(node, safe='') + '/delay?' + query)
+    except Refused as ex:
+        current(profile)
+        return {'ok': 1, 'id': profile, 'name': node, 'delay': None, 'error': str(ex)}
+    current(profile)
+    delay = result.get('delay')
+    return {'ok': 1, 'id': profile, 'name': node,
+            'delay': delay if isinstance(delay, int) and delay > 0 else None}
+
+
+def restore(profile):
+    for attempt in range(20):
+        try:
+            data = proxies(profile)
+            break
+        except (OSError, Refused):
+            if attempt == 19:
+                raise Refused('mihomo controller did not become ready')
+            time.sleep(.25)
+    for group, node in read_selection(profile).items():
+        try:
+            member(data, group, node)
+        except Refused:
+            continue  # Subscription refresh removed a node: keep the engine's valid default.
+        request(profile, 'PUT', '/proxies/' + quote(group, safe=''), {'name': node})
+    return {'ok': 1}
+
+
+def main():
+    if os.geteuid() != 0:
+        raise Refused('Administrative access is required')
+    os.umask(0o077)
+    op = sys.argv[1] if len(sys.argv) > 1 else ''
+    if op == 'restore' and len(sys.argv) == 3:
+        return restore(sys.argv[2])
+    req = json.loads(sys.stdin.buffer.read(4097))
+    if not isinstance(req, dict) or set(req) - {'id', 'group', 'node'}:
+        raise Refused('Invalid request')
+    profile = req.get('id')
+    current(profile)
+    if op == 'get' and set(req) == {'id'}:
+        return snapshot(profile)
+    if op == 'select' and set(req) == {'id', 'group', 'node'}:
+        return choose(profile, req['group'], req['node'])
+    if op == 'delay' and set(req) == {'id', 'group', 'node'}:
+        return latency(profile, req['group'], req['node'])
+    raise Refused('Invalid operation')
+
+
+if __name__ == '__main__':
+    try:
+        print(json.dumps(main(), ensure_ascii=False))
+    except (Refused, OSError, ValueError, http.client.HTTPException) as ex:
+        message = str(ex) if isinstance(ex, Refused) else 'mihomo is not ready; refresh and try again'
+        print(json.dumps({'ok': 0, 'error': 'failed', 'detail': message}))
+        sys.exit(1)

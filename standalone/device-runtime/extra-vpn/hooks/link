@@ -1,0 +1,120 @@
+#!/bin/sh
+# hooks/link SYSROOT: make one system use this module (the vpn extra, $DISK/extra/vpn). mu300-extra runs it after
+# an install for every installed system and at every boot for the running one; mu300-update runs it for the new
+# systems before the reboot. SYSROOT "" is the running system, else the root of another one ($DISK/ubuntu, ...).
+#   SYSROOT/opt/mu300/bin/mu300-vpn -> the extra's bin/mu300-vpn
+#   SYSROOT/opt/mu300/lib/vpn       -> the extra's lib/vpn
+#   the service: Ubuntu (systemd) SYSROOT/etc/systemd/system/mu300-vpn.service, enabled with the link in
+#   multi-user.target.wants when the VPN is wanted; OpenWrt (SYSROOT/etc/openwrt_release) SYSROOT/etc/init.d/mu300-vpn
+#   and its /etc/rc.d link the same way
+#   SYSROOT/etc/mu300/vpn.conf.example
+# What an older image has there itself (its built-in mu300-vpn, library, service, example) is moved aside to
+# NAME.builtin, never deleted; hooks/unlink puts it back. Running it again changes nothing. A service link that is
+# there already stays, also when the VPN is not wanted (mu300-vpn off removes it; the service does nothing with
+# ENABLE=0 anyway). For the running system it also reloads systemd, and starts the service when the VPN is wanted
+# and it is not running. mu300-extra and mu300-update run it as MU300_DISK=DISK MU300_EXTRA_DIR=DISK/extra/vpn
+# sh hooks/link SYSROOT: the links point at MU300_EXTRA_DIR (default $MU300_DISK/extra/vpn, MU300_DISK default
+# /mnt/mu300-disk), the path every system sees the extra at; the files copied come from this hook's own module.
+# (MU300_VPN_LIVE=1|0: those service calls or not, by default for SYSROOT "" only - tests/.)
+set -eu
+R=${1?usage: hooks/link SYSROOT   (SYSROOT "" = the running system)}
+R=${R%/}
+HERE=$(cd "$(dirname "$0")/.." && pwd)
+DISK=${MU300_DISK:-/mnt/mu300-disk}
+EXTRA=${MU300_EXTRA_DIR:-$DISK/extra/vpn}
+LIVE=${MU300_VPN_LIVE:-}; [ -n "$LIVE" ] || { [ -n "$R" ] && LIVE=0 || LIVE=1; }
+
+[ -x "$HERE/bin/mu300-vpn" ] && [ -r "$HERE/lib/vpn/uri.sh" ] || { echo "hooks/link: $HERE is not the vpn module" >&2; exit 1; }
+
+# wanted: the VPN is on in this system - ENABLE=1 in its vpn.conf, the last ENABLE line, read the way
+# mu300-vpn enabled reads it (read_enable), without sourcing the file and without running anything
+wanted() {
+    _e=$(sed -n "/^ENABLE=/{s/^ENABLE=//; s/[[:space:]]#.*//; s/[\"' ]//g; p;}" "$R/etc/mu300/vpn.conf" 2>/dev/null | tail -n1)
+    [ "$_e" = 1 ]
+}
+# aside PATH: a file or directory there that is not a link moves to PATH.builtin (PATH.builtin.N when that is
+# taken), so nothing of the system's own is lost
+aside() {
+    [ -e "$1" ] && [ ! -L "$1" ] || return 0
+    _to=$1.builtin; _n=1
+    while [ -e "$_to" ] || [ -L "$_to" ]; do _to=$1.builtin.$_n; _n=$((_n + 1)); done
+    mv "$1" "$_to"
+    echo "kept the system's own ${1#"$R"} as ${_to#"$R"}"
+}
+# put SRC DST MODE: SRC copied to DST (through a temporary file next to it, renamed over it). Before the system is
+# linked the first time, a different file at DST is the system's own and moves aside; afterwards it is this
+# module's earlier copy and is replaced.
+put() {
+    if [ -n "$first" ] && [ -e "$2" ] && ! cmp -s "$1" "$2"; then aside "$2"; fi
+    [ ! -L "$2" ] || rm -f "$2"
+    cp "$1" "$2.new.$$" && chmod "$3" "$2.new.$$" && mv -f "$2.new.$$" "$2" || { rm -f "$2.new.$$"; return 1; }
+}
+# link TARGET PATH: PATH a symlink to TARGET, the system's own file or directory there moved aside first
+link() {
+    aside "$2"
+    # (-n: a link to a directory there is replaced, not followed)
+    if [ "$(readlink "$2" 2>/dev/null)" != "$1" ]; then ln -sfn "$1" "$2"; fi
+}
+
+# OpenWrt's crontab line for the subscriptions (hooks/unlink removes the line with the mark)
+CRON_MARK='# mu300-vpn subscriptions'
+CRON_LINE="17 * * * * /opt/mu300/bin/mu300-vpn subscription refresh --due >/dev/null 2>&1 $CRON_MARK"
+cron_new=
+
+# first: this system has not been linked yet (no link at its mu300-vpn), so what is there is its own
+first=; [ -L "$R/opt/mu300/bin/mu300-vpn" ] || first=1
+mkdir -p "$R/opt/mu300/bin" "$R/opt/mu300/lib" "$R/etc/mu300"
+
+put "$HERE/etc/vpn.conf.example" "$R/etc/mu300/vpn.conf.example" 644
+if [ -e "$R/etc/openwrt_release" ]; then
+    mkdir -p "$R/etc/init.d" "$R/etc/rc.d"
+    put "$HERE/service/procd/mu300-vpn" "$R/etc/init.d/mu300-vpn" 755
+    # what /etc/init.d/mu300-vpn enable makes: S<START>name -> ../init.d/name
+    start=$(sed -n 's/^START=\([0-9][0-9]*\)$/\1/p' "$HERE/service/procd/mu300-vpn" | head -n1)
+    if wanted && ! ls "$R"/etc/rc.d/S*mu300-vpn >/dev/null 2>&1; then
+        ln -s ../init.d/mu300-vpn "$R/etc/rc.d/S${start:-95}mu300-vpn"
+    fi
+    # the hourly refresh of the subscriptions that are due: one line of root's crontab, marked as ours
+    mkdir -p "$R/etc/crontabs"
+    if ! grep -qF "$CRON_MARK" "$R/etc/crontabs/root" 2>/dev/null; then
+        printf '%s\n' "$CRON_LINE" >> "$R/etc/crontabs/root"; cron_new=1
+    fi
+else
+    mkdir -p "$R/etc/systemd/system"
+    put "$HERE/service/systemd/mu300-vpn.service" "$R/etc/systemd/system/mu300-vpn.service" 644
+    # what systemctl enable makes
+    w=$R/etc/systemd/system/multi-user.target.wants
+    if wanted && [ ! -L "$w/mu300-vpn.service" ]; then
+        mkdir -p "$w"; ln -sfn /etc/systemd/system/mu300-vpn.service "$w/mu300-vpn.service"
+    fi
+    # the hourly refresh of the subscriptions that are due: a timer, always enabled (it does nothing without any)
+    put "$HERE/service/systemd/mu300-vpn-subscriptions.service" "$R/etc/systemd/system/mu300-vpn-subscriptions.service" 644
+    put "$HERE/service/systemd/mu300-vpn-subscriptions.timer" "$R/etc/systemd/system/mu300-vpn-subscriptions.timer" 644
+    t=$R/etc/systemd/system/timers.target.wants
+    mkdir -p "$t"
+    [ -L "$t/mu300-vpn-subscriptions.timer" ] ||
+        ln -sfn /etc/systemd/system/mu300-vpn-subscriptions.timer "$t/mu300-vpn-subscriptions.timer"
+fi
+link "$EXTRA/lib/vpn" "$R/opt/mu300/lib/vpn"
+# the command last: its link is what says this system is linked (first above)
+link "$EXTRA/bin/mu300-vpn" "$R/opt/mu300/bin/mu300-vpn"
+
+if [ "$LIVE" = 1 ]; then
+    if [ -e "$R/etc/openwrt_release" ]; then
+        if wanted && ! "$R/etc/init.d/mu300-vpn" running >/dev/null 2>&1; then
+            "$R/etc/init.d/mu300-vpn" start >/dev/null 2>&1 || echo "could not start the mu300-vpn service" >&2
+        fi
+        # cron reads its crontab when it starts: a new line needs it (re)started, and enabled
+        if [ -n "$cron_new" ] && [ -x "$R/etc/init.d/cron" ]; then
+            { "$R/etc/init.d/cron" enable && "$R/etc/init.d/cron" restart; } >/dev/null 2>&1 || true
+        fi
+    elif command -v systemctl >/dev/null 2>&1; then
+        systemctl daemon-reload >/dev/null 2>&1 || true
+        systemctl --no-block start mu300-vpn-subscriptions.timer >/dev/null 2>&1 || true
+        # --no-block: at boot this runs from a unit the VPN's own start may be ordered after
+        if wanted && ! systemctl is-active --quiet mu300-vpn 2>/dev/null; then
+            systemctl --no-block start mu300-vpn >/dev/null 2>&1 || echo "could not start the mu300-vpn service" >&2
+        fi
+    fi
+fi
+exit 0
