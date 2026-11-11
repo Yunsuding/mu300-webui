@@ -13,6 +13,9 @@ import os
 import sys
 import json
 import time
+import gzip
+import hashlib
+import tempfile
 import secrets
 import subprocess
 import mimetypes
@@ -49,43 +52,70 @@ SESSIONS_FILE = os.path.join(BASE_DIR, ".sessions.json")
 
 # 会话存储 (Token -> {"user": user, "expire": timestamp})
 SESSIONS = {}
+STATE_LOCK = threading.RLock()
+AT_LOCK = threading.Lock()
+STATIC_ASSET_CACHE = {}
 NET_PREV = {"time": time.time(), "rx": 0, "tx": 0, "rx_rate": 0, "tx_rate": 0}
+
+def _atomic_write_text(filepath, content, mode=None):
+    """原子写入配置文件，防止断电或多线程并发导致 JSON/YAML 半写损坏"""
+    parent = os.path.dirname(os.path.abspath(filepath)) or "."
+    os.makedirs(parent, exist_ok=True)
+    fd, tmp_path = tempfile.mkstemp(prefix=".u30tmp-", dir=parent)
+    try:
+        with os.fdopen(fd, "w", encoding="utf-8", newline="\n") as f:
+            f.write(content)
+            f.flush()
+        if mode is not None:
+            try:
+                os.chmod(tmp_path, mode)
+            except OSError:
+                pass
+        os.replace(tmp_path, filepath)
+    finally:
+        if os.path.exists(tmp_path):
+            try:
+                os.remove(tmp_path)
+            except OSError:
+                pass
 
 def get_realtime_traffic():
     """实时读取 /proc/net/dev 获取微秒级精确上下行网速"""
     global NET_PREV
-    now = time.time()
-    dt = max(0.2, now - NET_PREV["time"])
-    try:
-        with open("/proc/net/dev", "r") as f:
-            lines = f.readlines()
-        for line in lines[2:]:
-            parts = line.split(":")
-            if len(parts) == 2 and parts[0].strip() == "sipa_eth0":
-                fields = parts[1].split()
-                rx = int(fields[0])
-                tx = int(fields[8])
-                if NET_PREV["rx"] > 0:
-                    rx_rate = max(0.0, (rx - NET_PREV["rx"]) / dt)
-                    tx_rate = max(0.0, (tx - NET_PREV["tx"]) / dt)
-                    NET_PREV["rx_rate"] = rx_rate
-                    NET_PREV["tx_rate"] = tx_rate
-                NET_PREV["rx"] = rx
-                NET_PREV["tx"] = tx
-                NET_PREV["time"] = now
-                break
-    except Exception:
-        pass
-    return {
-        "ok": 1,
-        "rx_rate": NET_PREV["rx_rate"],
-        "tx_rate": NET_PREV["tx_rate"],
-        "rx_bytes": NET_PREV["rx"],
-        "tx_bytes": NET_PREV["tx"]
-    }
+    with STATE_LOCK:
+        now = time.time()
+        dt = max(0.2, now - NET_PREV["time"])
+        try:
+            with open("/proc/net/dev", "r") as f:
+                lines = f.readlines()
+            for line in lines[2:]:
+                parts = line.split(":")
+                if len(parts) == 2 and parts[0].strip() == "sipa_eth0":
+                    fields = parts[1].split()
+                    rx = int(fields[0])
+                    tx = int(fields[8])
+                    if NET_PREV["rx"] > 0:
+                        rx_rate = max(0.0, (rx - NET_PREV["rx"]) / dt)
+                        tx_rate = max(0.0, (tx - NET_PREV["tx"]) / dt)
+                        NET_PREV["rx_rate"] = rx_rate
+                        NET_PREV["tx_rate"] = tx_rate
+                    NET_PREV["rx"] = rx
+                    NET_PREV["tx"] = tx
+                    NET_PREV["time"] = now
+                    break
+        except Exception:
+            pass
+        return {
+            "ok": 1,
+            "rx_rate": NET_PREV["rx_rate"],
+            "tx_rate": NET_PREV["tx_rate"],
+            "rx_bytes": NET_PREV["rx"],
+            "tx_bytes": NET_PREV["tx"]
+        }
 
 CELLULAR_CACHE = {
     "time": 0,
+    "static_time": 0,
     "data": {
         "qci": 8,
         "dl_rate_str": "512 Mbps",
@@ -103,18 +133,25 @@ CELLULAR_CACHE = {
     }
 }
 
-def get_cellular_qos():
-    """实时读取蜂窝射频与 QoS 签约状态 (QCI, 签约上下行限速, 5G频段, SINR/RSRP/RSRQ)"""
+def get_cellular_qos(force_static=False):
+    """实时读取蜂窝射频与 QoS 签约状态 (信号 12s 缓存，运营商/签约速率 300s 长缓存，AT 串口互斥)"""
     global CELLULAR_CACHE
     now = time.time()
-    if now - CELLULAR_CACHE["time"] < 10 and CELLULAR_CACHE["data"]:
+    if not force_static and now - CELLULAR_CACHE["time"] < 12 and CELLULAR_CACHE["data"]:
         return CELLULAR_CACHE["data"]
-    
-    data = dict(CELLULAR_CACHE["data"])
+
+    if not AT_LOCK.acquire(timeout=1.5):
+        return dict(CELLULAR_CACHE["data"])
+
     try:
+        now = time.time()
+        if not force_static and now - CELLULAR_CACHE["time"] < 12 and CELLULAR_CACHE["data"]:
+            return CELLULAR_CACHE["data"]
+
+        data = dict(CELLULAR_CACHE["data"])
         at_bin = "/opt/mu300/bin/mu300-at"
+        need_static = force_static or (now - CELLULAR_CACHE.get("static_time", 0) >= 300)
         if os.path.exists(at_bin):
-            # 1. 信号质量 (CESQ: ss_rsrq, ss_rsrp, ss_sinr)
             proc = subprocess.run([at_bin, "AT+CESQ"], capture_output=True, text=True, timeout=3)
             out = proc.stdout
             m = re.search(r'\+CESQ:\s*(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?', out)
@@ -124,112 +161,114 @@ def get_cellular_qos():
                     data["rsrp"] = -156 + int(ss_rsrp)
                 elif m.group(6) and m.group(6) != '255':
                     data["rsrp"] = int(m.group(6)) - 140
-                
+
                 if ss_rsrq and ss_rsrq != '255':
                     data["rsrq"] = round(-43.0 + int(ss_rsrq) * 0.5, 1)
                 elif m.group(5) and m.group(5) != '255':
                     data["rsrq"] = round(-19.5 + int(m.group(5)) * 0.5, 1)
-                
+
                 if ss_sinr and ss_sinr != '255':
                     data["sinr"] = round(-23.0 + int(ss_sinr) * 0.5, 1)
 
-            # 2. 签约 QoS 状态 (C5GQOSRDP / CGEQOSRDP: QCI 与 AMBR 签约速率)
-            proc = subprocess.run([at_bin, "AT+C5GQOSRDP=1"], capture_output=True, text=True, timeout=3)
-            out = proc.stdout
-            if "+C5GQOSRDP:" not in out:
-                proc = subprocess.run([at_bin, "AT+CGEQOSRDP=1"], capture_output=True, text=True, timeout=3)
+            if need_static:
+                proc = subprocess.run([at_bin, "AT+C5GQOSRDP=1"], capture_output=True, text=True, timeout=3)
                 out = proc.stdout
-            
-            m = re.search(r'\+(?:C5GQOSRDP|CGEQOSRDP):\s*(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)', out)
-            if m:
-                qci = int(m.group(2))
-                dl = int(m.group(7))
-                ul = int(m.group(8))
-                data["qci"] = qci
-                data["dl_kbps"] = dl
-                data["ul_kbps"] = ul
-                
-                def fmt(kbps):
-                    if kbps >= 1000000:
-                        val = kbps / 1000000.0
-                        return f"{val:.1f} Gbps" if val % 1 != 0 else f"{int(val)} Gbps"
-                    elif kbps >= 1000:
-                        return f"{int(round(kbps / 1000.0))} Mbps"
-                    else:
-                        return f"{kbps} kbps"
-                
-                data["dl_rate_str"] = fmt(dl)
-                data["ul_rate_str"] = fmt(ul)
+                if "+C5GQOSRDP:" not in out:
+                    proc = subprocess.run([at_bin, "AT+CGEQOSRDP=1"], capture_output=True, text=True, timeout=3)
+                    out = proc.stdout
 
-            # 3. 运营商与制式 (COPS)
-            proc = subprocess.run([at_bin, "AT+COPS?"], capture_output=True, text=True, timeout=3)
-            out = proc.stdout
-            m = re.search(r'\+COPS:\s*(\d+),(\d+),"(\d+)"(?:,(\d+))?', out)
-            if m:
-                oper = m.group(3)
-                act = m.group(4) or "11"
-                data["operator"] = oper
-                oper_map = {
-                    "46000": "中国移动", "46002": "中国移动", "46007": "中国移动", "46008": "中国移动",
-                    "46001": "中国联通", "46006": "中国联通", "46009": "中国联通",
-                    "46011": "中国电信", "46003": "中国电信", "46005": "中国电信",
-                    "46015": "中国广电"
-                }
-                data["operator_name"] = oper_map.get(oper, f"运营商 ({oper})")
-                rat_map = {"7": "4G LTE", "13": "5G NSA", "11": "5G SA", "12": "5G SA"}
-                data["rat"] = rat_map.get(act, "5G")
-                
-                # 读取锁定配置或实际驻留频段
-                lock_file = "/var/run/unisoc-modem/lock.json"
-                locked_nr = None
-                locked_lte = None
-                serving_nr_band = None
-                serving_lte_band = None
-                if os.path.exists(lock_file):
-                    try:
-                        with open(lock_file, "r") as lf:
-                            lj = json.load(lf)
-                            nr_obj = lj.get("nr", {}) if isinstance(lj.get("nr"), dict) else {}
-                            lte_obj = lj.get("lte", {}) if isinstance(lj.get("lte"), dict) else {}
-                            srv_obj = lj.get("serving", {}) if isinstance(lj.get("serving"), dict) else {}
-                            locked_nr = str(nr_obj.get("locked", "") or "")
-                            locked_lte = str(lte_obj.get("locked", "") or "")
-                            serving_nr_band = str(nr_obj.get("band", "") or srv_obj.get("nr_band", "") or srv_obj.get("band", "") or "")
-                            serving_lte_band = str(lte_obj.get("band", "") or srv_obj.get("lte_band", "") or "")
-                    except Exception:
-                        pass
+                m = re.search(r'\+(?:C5GQOSRDP|CGEQOSRDP):\s*(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)', out)
+                if m:
+                    qci = int(m.group(2))
+                    dl = int(m.group(7))
+                    ul = int(m.group(8))
+                    data["qci"] = qci
+                    data["dl_kbps"] = dl
+                    data["ul_kbps"] = ul
 
-                if "5G" in data["rat"]:
-                    if serving_nr_band:
-                        b_clean = serving_nr_band.lstrip("nN")
-                        data["band"] = f"n{b_clean}"
-                    elif locked_nr and "," not in locked_nr:
-                        data["band"] = f"n{locked_nr.lstrip('nN')}"
-                    elif oper in ["46001", "46006", "46009", "46011", "46003", "46005"]:
-                        data["band"] = "n78"
-                    elif oper == "46015":
-                        data["band"] = "n28"
-                    else:
-                        data["band"] = "n41"
+                    def fmt(kbps):
+                        if kbps >= 1000000:
+                            val = kbps / 1000000.0
+                            return f"{val:.1f} Gbps" if val % 1 != 0 else f"{int(val)} Gbps"
+                        elif kbps >= 1000:
+                            return f"{int(round(kbps / 1000.0))} Mbps"
+                        else:
+                            return f"{kbps} kbps"
+
+                    data["dl_rate_str"] = fmt(dl)
+                    data["ul_rate_str"] = fmt(ul)
+
+                proc = subprocess.run([at_bin, "AT+COPS?"], capture_output=True, text=True, timeout=3)
+                out = proc.stdout
+                m = re.search(r'\+COPS:\s*(\d+),(\d+),"(\d+)"(?:,(\d+))?', out)
+                if m:
+                    oper = m.group(3)
+                    act = m.group(4) or "11"
+                    data["operator"] = oper
+                    oper_map = {
+                        "46000": "中国移动", "46002": "中国移动", "46007": "中国移动", "46008": "中国移动",
+                        "46001": "中国联通", "46006": "中国联通", "46009": "中国联通",
+                        "46011": "中国电信", "46003": "中国电信", "46005": "中国电信",
+                        "46015": "中国广电"
+                    }
+                    data["operator_name"] = oper_map.get(oper, f"运营商 ({oper})")
+                    rat_map = {"7": "4G LTE", "13": "5G NSA", "11": "5G SA", "12": "5G SA"}
+                    data["rat"] = rat_map.get(act, "5G")
+                CELLULAR_CACHE["static_time"] = now
+
+            oper = data.get("operator", "46000")
+            lock_file = "/var/run/unisoc-modem/lock.json"
+            locked_nr = None
+            locked_lte = None
+            serving_nr_band = None
+            serving_lte_band = None
+            if os.path.exists(lock_file):
+                try:
+                    with open(lock_file, "r") as lf:
+                        lj = json.load(lf)
+                        nr_obj = lj.get("nr", {}) if isinstance(lj.get("nr"), dict) else {}
+                        lte_obj = lj.get("lte", {}) if isinstance(lj.get("lte"), dict) else {}
+                        srv_obj = lj.get("serving", {}) if isinstance(lj.get("serving"), dict) else {}
+                        locked_nr = str(nr_obj.get("locked", "") or "")
+                        locked_lte = str(lte_obj.get("locked", "") or "")
+                        serving_nr_band = str(nr_obj.get("band", "") or srv_obj.get("nr_band", "") or srv_obj.get("band", "") or "")
+                        serving_lte_band = str(lte_obj.get("band", "") or srv_obj.get("lte_band", "") or "")
+                except Exception:
+                    pass
+
+            if "5G" in data.get("rat", "5G"):
+                if serving_nr_band:
+                    b_clean = serving_nr_band.lstrip("nN")
+                    data["band"] = f"n{b_clean}"
+                elif locked_nr and "," not in locked_nr:
+                    data["band"] = f"n{locked_nr.lstrip('nN')}"
+                elif oper in ["46001", "46006", "46009", "46011", "46003", "46005"]:
+                    data["band"] = "n78"
+                elif oper == "46015":
+                    data["band"] = "n28"
                 else:
-                    if serving_lte_band:
-                        b_clean = serving_lte_band.lstrip("bB")
-                        data["band"] = f"B{b_clean}"
-                    elif locked_lte and "," not in locked_lte:
-                        data["band"] = f"B{locked_lte.lstrip('bB')}"
-                    elif oper in ["46001", "46006"]:
-                        data["band"] = "B3"
-                    elif oper in ["46011", "46003"]:
-                        data["band"] = "B1"
-                    else:
-                        data["band"] = "B39"
+                    data["band"] = "n41"
+            else:
+                if serving_lte_band:
+                    b_clean = serving_lte_band.lstrip("bB")
+                    data["band"] = f"B{b_clean}"
+                elif locked_lte and "," not in locked_lte:
+                    data["band"] = f"B{locked_lte.lstrip('bB')}"
+                elif oper in ["46001", "46006"]:
+                    data["band"] = "B3"
+                elif oper in ["46011", "46003"]:
+                    data["band"] = "B1"
+                else:
+                    data["band"] = "B39"
 
         CELLULAR_CACHE["time"] = now
         CELLULAR_CACHE["data"] = data
     except Exception as e:
         print(f"[Cellular QoS Error] {e}")
+    finally:
+        AT_LOCK.release()
 
-    return data
+    return CELLULAR_CACHE["data"]
 
 CELLULAR_IP_CACHE = {
     "time": 0,
@@ -424,7 +463,7 @@ def get_battery_info(force=False):
         import time as _time
         now = _time.time()
         cache = globals().get("BATTERY_INFO_CACHE")
-        if not force and cache and cache.get("data") is not None and (now - cache.get("time", 0) < 4.5):
+        if not force and cache and cache.get("data") is not None and (now - cache.get("time", 0) < 8.0):
             return cache["data"]
     except Exception:
         now = 0
@@ -443,22 +482,51 @@ def get_battery_info(force=False):
         except (TypeError, ValueError):
             return None
 
+    def int_div(value, div=1000):
+        try:
+            return int(int(value) / div)
+        except (TypeError, ValueError):
+            return None
+
     supply = "/sys/class/power_supply/"
     inputs = [read(supply + p + "/online") for p in ("ac", "usb", "bq2560x_charger")]
     plugged = True if "1" in inputs else (False if "0" in inputs else None)
     cap = number(read(supply + "battery/capacity"))
     volts = number(read(supply + "battery/voltage_now"), 1000000)
     raw = read(supply + "bq2560x_charger/status") or "Unknown"
+    sysfs_ma = int_div(read(supply + "battery/current_now"), 1000)
+    sysfs_temp = number(read(supply + "battery/temp"))
+    full_mah = int_div(read(supply + "battery/charge_full"), 1000)
+    design_mah = int_div(read(supply + "battery/charge_full_design"), 1000)
+    soh_pct = round(min(105.0, (full_mah / design_mah) * 100.0), 1) if (full_mah and design_mah and design_mah > 0) else None
+
     policy = {}
-    try:
-        result = subprocess.run([API_BIN, "power.get"], input="{}", text=True,
-                                capture_output=True, timeout=3)
-        if result.returncode == 0:
-            candidate = json.loads(result.stdout)
-            if isinstance(candidate, dict) and candidate.get("ok"):
-                policy = candidate
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        pass
+    raw_pconf = read("/etc/mu300/power.conf")
+    if raw_pconf is not None:
+        parsed_conf = {"CHARGE_TO": 100, "SAVER_BELOW": 20, "RESUME_AT": 0, "FULL_ONCE": 0, "CHARGE_PAUSE": 0}
+        for line in raw_pconf.splitlines():
+            line = line.strip()
+            if "=" in line and not line.startswith("#"):
+                k, v = line.split("=", 1)
+                parsed_conf[k.strip()] = v.strip()
+        policy = {
+            "ok": 1,
+            "supply": "plugged" if plugged else ("battery" if plugged is False else None),
+            "charge_off": read("/run/mu300/power/charge-off") or None,
+            "conf": parsed_conf,
+            "battery": {"capacity": cap, "ma": sysfs_ma, "temp": sysfs_temp}
+        }
+    else:
+        try:
+            result = subprocess.run([API_BIN, "power.get"], input="{}", text=True,
+                                    capture_output=True, timeout=3)
+            if result.returncode == 0:
+                candidate = json.loads(result.stdout)
+                if isinstance(candidate, dict) and candidate.get("ok"):
+                    policy = candidate
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
+
     conf = policy.get("conf") if isinstance(policy.get("conf"), dict) else {}
     battery = policy.get("battery") if isinstance(policy.get("battery"), dict) else {}
     if plugged is None and policy.get("supply") in ("plugged", "battery"):
@@ -468,25 +536,60 @@ def get_battery_info(force=False):
     if volts is None:
         volts = number(battery.get("mv"), 1000)
 
-    # The helper rejects unknown kernels/chips. Also compare its HAL read with
-    # the actual BQ CHG_CONFIG bit, rather than trusting the policy marker.
     enabled = None
     verified = False
-    try:
-        result = subprocess.run(["/opt/mu300/bin/mu300-sqc-charge", "get"],
-                                text=True, capture_output=True, timeout=2)
-        regs = read(supply + "bq2560x_charger/device/registers") or ""
-        primary = regs.split("SLAVE Reg:")[0]
-        match = re.search(r"^Reg\[01\] = 0x([0-9a-fA-F]{2})$", primary, re.M)
-        if result.returncode == 0 and result.stdout.strip() in ("0", "1") and match:
-            hal = result.stdout.strip() == "1"
-            if hal == bool(int(match[1], 16) & 0x10):
-                enabled, verified = hal, True
-    except (OSError, ValueError, subprocess.TimeoutExpired):
-        pass
+    input_limit_ma = None
+    charge_current_limit_ma = None
+    regs = read(supply + "bq2560x_charger/device/registers") or ""
+    primary = regs.split("SLAVE Reg:")[0]
+    match = re.search(r"^Reg\[01\] = 0x([0-9a-fA-F]{2})$", primary, re.M)
+    m_r00 = re.search(r"^Reg\[00\] = 0x([0-9a-fA-F]{2})$", primary, re.M)
+    m_r02 = re.search(r"^Reg\[02\] = 0x([0-9a-fA-F]{2})$", primary, re.M)
+    if m_r00:
+        r00_val = int(m_r00[1], 16)
+        input_limit_ma = 0 if (r00_val & 0x80) else (100 + (r00_val & 0x1f) * 100)
+    if m_r02:
+        charge_current_limit_ma = (int(m_r02[1], 16) & 0x3f) * 60
+
+    hal_val = None
+    if raw_pconf is not None:
+        try:
+            import os as _os, struct as _struct
+            if _os.uname().release == "5.4.254-gb50db5b6224c":
+                fd = _os.open("/dev/sqc_chg_node", _os.O_RDONLY | _os.O_CLOEXEC)
+                try:
+                    _os.lseek(fd, 273, _os.SEEK_SET)
+                    buf = _os.read(fd, 4)
+                    if len(buf) == 4:
+                        v = _struct.unpack("<I", buf)[0]
+                        if v in (0, 1):
+                            hal_val = (v == 1)
+                finally:
+                    _os.close(fd)
+        except Exception:
+            hal_val = None
+
+    if hal_val is not None and match:
+        if hal_val == bool(int(match[1], 16) & 0x10):
+            enabled, verified = hal_val, True
+    else:
+        try:
+            result = subprocess.run(["/opt/mu300/bin/mu300-sqc-charge", "get"],
+                                    text=True, capture_output=True, timeout=2)
+            if result.returncode == 0 and result.stdout.strip() in ("0", "1") and match:
+                hal = result.stdout.strip() == "1"
+                if hal == bool(int(match[1], 16) & 0x10):
+                    enabled, verified = hal, True
+        except (OSError, ValueError, subprocess.TimeoutExpired):
+            pass
 
     reason = policy.get("charge_off")
     full_once = str(conf.get("FULL_ONCE", 0)) == "1"
+    manual_pause = str(conf.get("CHARGE_PAUSE", 0)) == "1"
+    cur_ma = sysfs_ma if sysfs_ma is not None else number(battery.get("ma"))
+    bat_temp_c = number(sysfs_temp if sysfs_temp is not None else battery.get("temp"), 10)
+    power_mw = round(volts * cur_ma) if (volts is not None and cur_ma is not None) else None
+
     charging = False
     state, text = "unknown", "充电状态未知"
     if plugged is False:
@@ -497,7 +600,7 @@ def get_battery_info(force=False):
     elif plugged is True and verified and enabled:
         if raw.lower() == "full":
             state, text = "full", "已充满（充电开关开启）"
-        elif raw.lower() == "charging" or (number(battery.get("ma")) or 0) > 20:
+        elif raw.lower() == "charging" or (cur_ma or 0) > 20:
             charging = True
             state, text = "charging", "充电中（充满一次）" if full_once else "充电中"
         else:
@@ -506,6 +609,7 @@ def get_battery_info(force=False):
         text = "电源已连接，充电开关未核实"
     limit = number(conf.get("CHARGE_TO"))
     resume = number(conf.get("RESUME_AT"))
+    saver_below = number(conf.get("SAVER_BELOW"))
     if limit is not None and (resume is None or resume <= 0 or resume >= limit):
         resume = max(0, limit - 5)
     detail = "硬件开关已核实" if verified else "硬件读取失败或当前驱动未适配"
@@ -517,14 +621,21 @@ def get_battery_info(force=False):
         detail += "；允许充至满电"
     elif limit is not None:
         detail += "；上限 %g%%，低于 %g%% 恢复" % (limit, resume if resume is not None else max(0, limit - 5))
+    if state == "paused" and input_limit_ma and input_limit_ma >= 1500 and cur_ma is not None and abs(cur_ma) <= 5:
+        detail += "；零循环旁路供电生效 (0mA)"
+    elif charging and charge_current_limit_ma and charge_current_limit_ma <= 1020 and not full_once:
+        detail += "；%dmA 低温柔充保护中" % charge_current_limit_ma
     if full_once:
         detail += "；充满一次已开启（仍受温度保护）"
     res = {"capacity": cap, "plugged": plugged, "charging": charging,
             "state": state, "status_text": text, "voltage_v": volts,
             "raw_charger": raw, "switch_enabled": enabled, "control_verified": verified,
             "pause_reason": reason, "charge_limit": limit, "resume_below": resume,
-            "full_once": full_once, "current_ma": number(battery.get("ma")),
-            "temperature_c": number(battery.get("temp"), 10), "detail_text": detail}
+            "saver_below": saver_below, "manual_pause": manual_pause,
+            "full_once": full_once, "current_ma": cur_ma, "power_mw": power_mw,
+            "soh_pct": soh_pct, "charge_full_mah": full_mah, "charge_design_mah": design_mah,
+            "input_limit_ma": input_limit_ma, "charge_current_limit_ma": charge_current_limit_ma,
+            "temperature_c": bat_temp_c, "detail_text": detail}
     if "get_thermal_details" in globals():
         thm = get_thermal_details(bat_temp_override=res["temperature_c"])
         res["thermal"] = thm
@@ -1308,21 +1419,27 @@ def unblock_station(mac):
 
 def load_sessions():
     global SESSIONS
-    if os.path.exists(SESSIONS_FILE):
-        try:
-            with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
-                data = json.load(f)
-                now = time.time()
-                SESSIONS = {k: v for k, v in data.items() if v.get("expire", 0) > now}
-        except Exception:
-            SESSIONS = {}
+    with STATE_LOCK:
+        if os.path.exists(SESSIONS_FILE):
+            try:
+                try:
+                    os.chmod(SESSIONS_FILE, 0o600)
+                except Exception:
+                    pass
+                with open(SESSIONS_FILE, "r", encoding="utf-8") as f:
+                    data = json.load(f)
+                    now = time.time()
+                    SESSIONS = {k: v for k, v in data.items() if v.get("expire", 0) > now}
+            except Exception:
+                SESSIONS = {}
 
 def save_sessions():
     try:
-        now = time.time()
-        valid = {k: v for k, v in SESSIONS.items() if v.get("expire", 0) > now}
-        with open(SESSIONS_FILE, "w", encoding="utf-8") as f:
-            json.dump(valid, f)
+        with STATE_LOCK:
+            now = time.time()
+            valid = {k: v for k, v in SESSIONS.items() if v.get("expire", 0) > now}
+            payload = json.dumps(valid)
+        _atomic_write_text(SESSIONS_FILE, payload, mode=0o600)
     except Exception:
         pass
 
@@ -2831,6 +2948,182 @@ def get_overview_data(req=None):
 
 get_overview_info = get_overview_data
 
+def _read_power_conf_dict():
+    conf = {
+        "CHARGE_TO": 80,
+        "RESUME_AT": 0,
+        "SAVER_BELOW": 20,
+        "CHARGE_PAUSE": 0,
+        "FULL_ONCE": 0,
+    }
+    if os.path.exists("/etc/mu300/power.conf"):
+        try:
+            with open("/etc/mu300/power.conf", "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s or s.startswith("#") or "=" not in s:
+                        continue
+                    k, v = s.split("=", 1)
+                    k = k.strip()
+                    v = v.strip().strip("'\"")
+                    if k in conf:
+                        try:
+                            conf[k] = int(v)
+                        except Exception:
+                            pass
+                    else:
+                        conf[k] = v
+        except Exception:
+            pass
+    return conf
+
+def _apply_power_guard_reload():
+    if os.path.exists("/opt/mu300/bin/mu300-power"):
+        try:
+            subprocess.run(["systemctl", "restart", "mu300-power.service"], capture_output=True, timeout=8)
+            time.sleep(0.25)
+        except Exception:
+            pass
+    BATTERY_INFO_CACHE["time"] = 0
+    OVERVIEW_API_CACHE["time"] = 0
+
+def handle_power_api(method, req_data):
+    """增强电源与电池养护控制：支持 60%/50% 长期插电养护、80%/70% 随身备电、回充滞回与单次充满"""
+    req_data = req_data if isinstance(req_data, dict) else {}
+    power_bin = "/opt/mu300/bin/mu300-power"
+
+    if method == "power.get":
+        resp = run_mu300_api("power.get", req_data)
+        if not isinstance(resp, dict):
+            resp = {"ok": 1}
+        pconf = _read_power_conf_dict()
+        conf_obj = dict(resp.get("conf") or {})
+        conf_obj.update(pconf)
+        resp["conf"] = conf_obj
+        resp["charge_to"] = conf_obj.get("CHARGE_TO", 80)
+        resp["resume_at"] = conf_obj.get("RESUME_AT", 0)
+        resp["saver_below"] = conf_obj.get("SAVER_BELOW", 20)
+        resp["charge_pause"] = conf_obj.get("CHARGE_PAUSE", 0)
+        resp["full_once"] = conf_obj.get("FULL_ONCE", 0)
+        return resp
+
+    if method == "power.set" and os.path.exists(power_bin):
+        key = str(req_data.get("key", "")).strip()
+        val = req_data.get("value", "")
+        if key in ("CHARGE_TO", "RESUME_AT", "SAVER_BELOW", "CHARGE_PAUSE", "FULL_ONCE"):
+            proc = subprocess.run([power_bin, "set", key, str(val)], capture_output=True, text=True, timeout=6)
+            if proc.returncode != 0:
+                return {"ok": 0, "error": (proc.stderr or proc.stdout or "power_set_failed").strip()}
+            if key in ("CHARGE_TO", "RESUME_AT", "CHARGE_PAUSE", "FULL_ONCE") and req_data.get("reload", True):
+                _apply_power_guard_reload()
+            else:
+                BATTERY_INFO_CACHE["time"] = 0
+                OVERVIEW_API_CACHE["time"] = 0
+            return {"ok": 1, "conf": _read_power_conf_dict()}
+
+    if method == "power.control":
+        if not os.path.exists(power_bin):
+            return {"ok": 0, "error": "mu300-power 未安装"}
+        action = str(req_data.get("action", "")).strip()
+        steps = []
+        msg = "电池养护配置已生效"
+        if action == "preset_server_60":
+            steps = [("set", "CHARGE_TO", "60"), ("set", "RESUME_AT", "50"), ("set", "CHARGE_PAUSE", "0"), ("set", "FULL_ONCE", "0")]
+            msg = "已切换至「长期插电养护模式」(60% 停充零循环旁路 / 低于 50% 涓流补电)"
+        elif action == "preset_portable_80":
+            steps = [("set", "CHARGE_TO", "80"), ("set", "RESUME_AT", "70"), ("set", "CHARGE_PAUSE", "0"), ("set", "FULL_ONCE", "0")]
+            msg = "已切换至「日常随身均衡模式」(80% 停充旁路 / 低于 70% 自动回充)"
+        elif action == "full_once":
+            steps = [("charge", "full")]
+            msg = "已开启「出门前单次充满 100%」，充满拔电后自动恢复日常养护上限"
+        elif action == "cancel_full_once":
+            steps = [("set", "FULL_ONCE", "0")]
+            msg = "已取消单次充满，恢复按设定上限停充保护"
+        elif action == "pause":
+            steps = [("charge", "pause")]
+            msg = "已手动暂停充电（插电状态直供主板，电池零循环）"
+        elif action == "resume":
+            steps = [("charge", "resume")]
+            msg = "已恢复自动充电护航策略"
+        else:
+            if "charge_to" in req_data:
+                ct = max(50, min(100, int(req_data["charge_to"])))
+                steps.append(("set", "CHARGE_TO", str(ct)))
+                if "resume_at" in req_data:
+                    ra = max(0, min(99, int(req_data["resume_at"])))
+                    if ct < 100 and ra >= ct:
+                        ra = max(40, ct - 5)
+                    elif ct == 100:
+                        ra = 0
+                    steps.append(("set", "RESUME_AT", str(ra)))
+            elif "resume_at" in req_data:
+                ra = max(0, min(99, int(req_data["resume_at"])))
+                steps.append(("set", "RESUME_AT", str(ra)))
+            if "saver_below" in req_data:
+                sb = max(5, min(50, int(req_data["saver_below"])))
+                steps.append(("set", "SAVER_BELOW", str(sb)))
+
+        for st_cmd in steps:
+            proc = subprocess.run([power_bin] + list(st_cmd), capture_output=True, text=True, timeout=6)
+            if proc.returncode != 0:
+                return {"ok": 0, "error": (proc.stderr or proc.stdout or "power_control_failed").strip()}
+
+        _apply_power_guard_reload()
+        return {
+            "ok": 1,
+            "msg": msg,
+            "conf": _read_power_conf_dict(),
+            "battery": get_battery_info(force=True),
+        }
+
+    return None
+
+def handle_login_request(client_ip, req_json):
+    now = time.time()
+    with STATE_LOCK:
+        fail_rec = dict(LOGIN_FAILURES.get(client_ip, {"count": 0, "until": 0}))
+    if fail_rec["until"] > now:
+        wait_s = max(1, int(fail_rec["until"] - now))
+        return 429, {"ok": 0, "error": f"密码错误次数过多，请等待 {wait_s} 秒后再试"}, None
+
+    username = str(req_json.get("username", "")).strip()
+    password = str(req_json.get("password", ""))
+    remember = bool(req_json.get("remember", True))
+
+    if verify_system_password(username, password):
+        token = secrets.token_hex(32)
+        duration = 30 * 86400 if remember else 86400
+        with STATE_LOCK:
+            LOGIN_FAILURES.pop(client_ip, None)
+            SESSIONS[token] = {
+                "user": username,
+                "expire": time.time() + duration
+            }
+        save_sessions()
+        cookie = f"u30_session={token}; Path=/; Max-Age={duration}; SameSite=Lax; HttpOnly"
+        print(f"[Auth] 用户 {username} 登录成功")
+        return 200, {"ok": 1, "username": username, "token": token}, cookie
+
+    with STATE_LOCK:
+        cur = LOGIN_FAILURES.get(client_ip, {"count": 0, "until": 0})
+        cnt = int(cur.get("count", 0)) + 1
+        LOGIN_FAILURES[client_ip] = {
+            "count": cnt,
+            "until": (now + 60) if cnt >= 5 else 0
+        }
+    return 401, {"ok": 0, "error": "用户名或密码错误"}, None
+
+def handle_logout_request(token):
+    removed = False
+    if token:
+        with STATE_LOCK:
+            if token in SESSIONS:
+                del SESSIONS[token]
+                removed = True
+    if removed:
+        save_sessions()
+    return "u30_session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly"
+
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -2856,19 +3149,35 @@ class WebUIHandler(BaseHTTPRequestHandler):
 
     def is_authenticated(self):
         token = self.get_token_from_request()
-        if not token or token not in SESSIONS:
+        if not token:
             return False, None
-        session = SESSIONS[token]
-        if session.get("expire", 0) < time.time():
-            del SESSIONS[token]
+        expired = False
+        user = None
+        with STATE_LOCK:
+            session = SESSIONS.get(token)
+            if not session:
+                return False, None
+            if session.get("expire", 0) < time.time():
+                del SESSIONS[token]
+                expired = True
+            else:
+                user = session.get("user")
+        if expired:
             save_sessions()
             return False, None
-        return True, session.get("user")
+        return True, user
 
     def send_json(self, data, code=200, set_cookie=None):
         body = json.dumps(data, ensure_ascii=False).encode("utf-8")
+        accept_enc = self.headers.get("Accept-Encoding", "") if hasattr(self, "headers") and self.headers else ""
+        use_gzip = len(body) >= 1024 and ("gzip" in accept_enc)
+        if use_gzip:
+            body = gzip.compress(body, compresslevel=5)
         self.send_response(code)
         self.send_header("Content-Type", "application/json; charset=utf-8")
+        if use_gzip:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
         self.send_header("Content-Length", str(len(body)))
         self.send_header("Access-Control-Allow-Origin", "*")
         self.send_header("Access-Control-Allow-Headers", "Content-Type, Authorization")
@@ -2876,7 +3185,61 @@ class WebUIHandler(BaseHTTPRequestHandler):
         if set_cookie:
             self.send_header("Set-Cookie", set_cookie)
         self.end_headers()
-        self.wfile.write(body)
+        if getattr(self, "command", "GET") != "HEAD":
+            self.wfile.write(body)
+
+    def _serve_static_file(self, file_path):
+        st = os.stat(file_path)
+        mtime_ns = getattr(st, "st_mtime_ns", int(st.st_mtime * 1e9))
+        fsize = st.st_size
+        with STATE_LOCK:
+            entry = STATIC_ASSET_CACHE.get(file_path)
+        if not entry or entry.get("mtime_ns") != mtime_ns or entry.get("size") != fsize:
+            ctype, _ = mimetypes.guess_type(file_path)
+            if not ctype:
+                ctype = "text/html" if file_path.endswith(".html") else "application/octet-stream"
+            with open(file_path, "rb") as f:
+                raw_bytes = f.read()
+            etag = '"' + hashlib.sha1(raw_bytes).hexdigest()[:16] + '"'
+            compressible = any(file_path.endswith(ext) for ext in (".html", ".js", ".css", ".json", ".svg", ".txt"))
+            gz_bytes = gzip.compress(raw_bytes, compresslevel=6) if (compressible and len(raw_bytes) >= 512) else None
+            entry = {
+                "mtime_ns": mtime_ns,
+                "size": fsize,
+                "ctype": ctype,
+                "etag": etag,
+                "raw": raw_bytes,
+                "gzip": gz_bytes,
+            }
+            with STATE_LOCK:
+                if len(STATIC_ASSET_CACHE) > 16:
+                    STATIC_ASSET_CACHE.clear()
+                STATIC_ASSET_CACHE[file_path] = entry
+
+        inm = self.headers.get("If-None-Match", "") if hasattr(self, "headers") and self.headers else ""
+        cache_ctl = "public, max-age=604800" if file_path.endswith("tailwindcss.js") else "no-cache"
+        if inm and entry["etag"] in [x.strip() for x in inm.split(",")]:
+            self.send_response(304)
+            self.send_header("ETag", entry["etag"])
+            self.send_header("Cache-Control", cache_ctl)
+            self.end_headers()
+            return
+
+        accept_enc = self.headers.get("Accept-Encoding", "") if hasattr(self, "headers") and self.headers else ""
+        use_gzip = entry["gzip"] is not None and ("gzip" in accept_enc)
+        payload = entry["gzip"] if use_gzip else entry["raw"]
+        ctype_hdr = f"{entry['ctype']}; charset=utf-8" if entry["ctype"].startswith(("text/", "application/javascript", "application/json")) else entry["ctype"]
+        self.send_response(200)
+        self.send_header("Content-Type", ctype_hdr)
+        if use_gzip:
+            self.send_header("Content-Encoding", "gzip")
+            self.send_header("Vary", "Accept-Encoding")
+        self.send_header("ETag", entry["etag"])
+        self.send_header("Cache-Control", cache_ctl)
+        self.send_header("Content-Length", str(len(payload)))
+        self.end_headers()
+        if getattr(self, "command", "GET") != "HEAD":
+            self.wfile.write(payload)
 
     def do_OPTIONS(self):
         self.send_response(204)
@@ -3034,17 +3397,7 @@ class WebUIHandler(BaseHTTPRequestHandler):
             file_path = os.path.join(WEB_DIR, "index.html")
 
         if os.path.exists(file_path) and os.path.isfile(file_path):
-            ctype, _ = mimetypes.guess_type(file_path)
-            if not ctype:
-                ctype = "text/html" if file_path.endswith(".html") else "application/octet-stream"
-            with open(file_path, "rb") as f:
-                content = f.read()
-            self.send_response(200)
-            self.send_header("Content-Type", f"{ctype}; charset=utf-8")
-            self.send_header("Content-Length", str(len(content)))
-            self.send_header("Cache-Control", "no-cache")
-            self.end_headers()
-            self.wfile.write(content)
+            self._serve_static_file(file_path)
         else:
             self.send_error(404, "File not found")
 
@@ -3057,46 +3410,14 @@ class WebUIHandler(BaseHTTPRequestHandler):
         # 1. 登录端点 (含防暴力破解保护)
         if path == "/api/login":
             client_ip = self.client_address[0] if self.client_address else "unknown"
-            now = time.time()
-            fail_rec = LOGIN_FAILURES.get(client_ip, {"count": 0, "until": 0})
-            if fail_rec["until"] > now:
-                wait_s = int(fail_rec["until"] - now)
-                self.send_json({"ok": 0, "error": f"密码错误次数过多，请等待 {wait_s} 秒后再试"}, code=429)
-                return
-
-            username = req_json.get("username", "").strip()
-            password = req_json.get("password", "")
-            remember = req_json.get("remember", True)
-
-            if verify_system_password(username, password):
-                LOGIN_FAILURES.pop(client_ip, None)
-                token = secrets.token_hex(32)
-                # 记住登录默认 30 天，否则 24 小时
-                duration = 30 * 86400 if remember else 86400
-                SESSIONS[token] = {
-                    "user": username,
-                    "expire": time.time() + duration
-                }
-                save_sessions()
-                cookie = f"u30_session={token}; Path=/; Max-Age={duration}; SameSite=Lax; HttpOnly"
-                self.send_json({"ok": 1, "username": username, "token": token}, set_cookie=cookie)
-                print(f"[Auth] 用户 {username} 登录成功")
-            else:
-                cnt = fail_rec["count"] + 1
-                LOGIN_FAILURES[client_ip] = {
-                    "count": cnt,
-                    "until": (now + 60) if cnt >= 5 else 0
-                }
-                self.send_json({"ok": 0, "error": "用户名或密码错误"}, code=401)
+            code, resp_obj, cookie = handle_login_request(client_ip, req_json)
+            self.send_json(resp_obj, code=code, set_cookie=cookie)
             return
 
         # 2. 登出端点
         if path == "/api/logout":
             token = self.get_token_from_request()
-            if token and token in SESSIONS:
-                del SESSIONS[token]
-                save_sessions()
-            cookie = "u30_session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly"
+            cookie = handle_logout_request(token)
             self.send_json({"ok": 1}, set_cookie=cookie)
             return
 
@@ -3302,6 +3623,12 @@ class WebUIHandler(BaseHTTPRequestHandler):
             if method == "overview":
                 self.send_json(get_overview_data(req_data))
                 return
+
+            if method in ("power.get", "power.set", "power.control"):
+                pwr_resp = handle_power_api(method, req_data)
+                if pwr_resp is not None:
+                    self.send_json(pwr_resp)
+                    return
 
             resp = run_mu300_api(method, req_data)
             if method.startswith("power.") or method.startswith("wifi.") or method.startswith("vpn."):

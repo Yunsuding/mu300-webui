@@ -29,9 +29,11 @@ def load_env(env_path=None):
 
 
 def run_sudo(ssh, password, cmd):
-    q_pw = shlex.quote(password)
-    full_cmd = f"printf '%s\\n' {q_pw} | sudo -S -p '' bash -lc {shlex.quote(cmd)}"
+    full_cmd = f"sudo -S -p '' -- bash -lc {shlex.quote(cmd)}"
     stdin, stdout, stderr = ssh.exec_command(full_cmd, timeout=45)
+    stdin.write(password + "\n")
+    stdin.flush()
+    stdin.channel.shutdown_write()
     out = stdout.read().decode("utf-8", errors="replace").strip()
     err = stderr.read().decode("utf-8", errors="replace").strip()
     rc = stdout.channel.recv_exit_status()

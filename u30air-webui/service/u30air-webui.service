@@ -10,6 +10,8 @@ WorkingDirectory=/opt/u30air-webui
 ExecStart=/usr/bin/python3 /opt/u30air-webui/server.py
 Restart=always
 RestartSec=5
+MemoryHigh=64M
+MemoryMax=128M
 StandardOutput=journal
 StandardError=journal
 

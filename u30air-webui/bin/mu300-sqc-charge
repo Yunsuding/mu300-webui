@@ -17,7 +17,53 @@ DEVICE = Path('/dev/sqc_chg_node')
 CLASS_DEV = Path('/sys/class/sqc_chg_node/sqc_chg_node/dev')
 CHARGER = Path('/sys/class/power_supply/bq2560x_charger')
 REGISTERS = CHARGER / 'device/registers'
+USB_TYPES = (CHARGER / 'usb_type', Path('/sys/class/power_supply/battery/usb_type'))
+POWER_CONF = Path('/etc/mu300/power.conf')
 ENABLE_OFFSET = 273
+BYPASS_IINDPM = 0x0e  # 1500mA input limit on wall chargers: prevents battery supplement drain
+GENTLE_ICHG = 0x10    # 960mA (~0.24C) cool maintenance charge
+FAST_ICHG = 0x22      # 2040mA stock fast charge when FULL_ONCE=1
+
+
+def is_wall_charger():
+    for path in USB_TYPES:
+        try:
+            txt = path.read_text()
+        except OSError:
+            continue
+        if any(tag in txt for tag in ('[DCP]', '[CDP]', '[C]', '[PD]', '[PD_DRP]', '[BrickID]')):
+            return True
+        if '[SDP]' in txt:
+            return False
+    return False
+
+
+def is_full_once():
+    try:
+        for line in POWER_CONF.read_text().splitlines():
+            if line.strip() == 'FULL_ONCE=1':
+                return True
+    except OSError:
+        pass
+    return False
+
+
+def tune_power_path(enabled):
+    """Eliminate parasitic supplement drain on wall adapters and soften routine charge current."""
+    try:
+        r = checked_registers()
+        if (r[0] & 0x80) or (r[1] & 0x20):
+            return
+        if is_wall_charger() and (r[0] & 0x1f) < BYPASS_IINDPM:
+            REGISTERS.write_text(f'0 00 {(r[0] & ~0x1f) | BYPASS_IINDPM:02x}\n')
+        if enabled and 2 in r:
+            full_once = is_full_once()
+            target = FAST_ICHG if full_once else GENTLE_ICHG
+            cur = r[2] & 0x3f
+            if (not full_once and cur > target) or (full_once and cur == GENTLE_ICHG):
+                REGISTERS.write_text(f'0 02 {(r[2] & ~0x3f) | target:02x}\n')
+    except (OSError, ValueError, RuntimeError):
+        pass
 
 
 def registers():
@@ -64,6 +110,7 @@ def apply_enable(fd, value, before):
         raise RuntimeError('Unexpected USB power-path change')
     if value and after[5] & 0x30 != before[5] & 0x30:
         raise RuntimeError('Could not restore the watchdog setting')
+    tune_power_path(bool(value))
 
 
 def set_enable(fd, value):
@@ -100,7 +147,9 @@ def main():
         checked_registers()
         if sys.argv[1] != 'get':
             set_enable(fd, int(sys.argv[1] == 'on'))
-        print(read_enable(fd))
+        state = read_enable(fd)
+        tune_power_path(bool(state))
+        print(state)
     finally:
         os.close(fd)
 

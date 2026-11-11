@@ -1281,7 +1281,7 @@
             <span id="pwr-bat-status">充电中</span>
           </span>
         </div>
-        <div class="grid grid-cols-2 sm:grid-cols-4 gap-3 text-center pt-1">
+        <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-3 text-center pt-1">
           <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80">
             <div class="text-[10px] text-slate-400">剩余电量 (SOC)</div>
             <div class="text-lg sm:text-xl font-bold font-mono text-white mt-0.5" id="pwr-bat-cap">99%</div>
@@ -1291,14 +1291,26 @@
             <div class="text-lg sm:text-xl font-bold font-mono text-cyan-300 mt-0.5" id="pwr-bat-volt">4.01 V</div>
           </div>
           <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80">
-            <div class="text-[10px] text-slate-400">供电来源 (Source)</div>
-            <div class="text-lg sm:text-xl font-bold font-mono text-emerald-400 mt-0.5" id="pwr-bat-source">USB 插电</div>
+            <div class="text-[10px] text-slate-400">电芯电流 / 功率</div>
+            <div class="text-base sm:text-lg font-bold font-mono text-emerald-400 mt-0.5" id="pwr-bat-curr">0 mA</div>
+            <div class="text-[10px] text-slate-500 font-mono" id="pwr-bat-pwr">零循环旁路</div>
           </div>
           <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80">
-            <div class="text-[10px] text-slate-400">电芯温度 / 容量</div>
-            <div class="text-lg sm:text-xl font-bold font-mono text-emerald-300 mt-0.5"><span id="pwr-bat-temp">35.0°C</span> <span class="text-xs text-slate-400 font-normal">/ 4500mAh</span></div>
+            <div class="text-[10px] text-slate-400">供电与输入限流</div>
+            <div class="text-base sm:text-lg font-bold font-mono text-emerald-400 mt-0.5" id="pwr-bat-source">USB 插电</div>
+            <div class="text-[10px] text-slate-500 font-mono" id="pwr-bat-ilim">--</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80">
+            <div class="text-[10px] text-slate-400">电芯温度</div>
+            <div class="text-lg sm:text-xl font-bold font-mono text-emerald-300 mt-0.5" id="pwr-bat-temp">30.0°C</div>
+          </div>
+          <div class="p-3 rounded-xl bg-slate-900/60 border border-slate-800/80">
+            <div class="text-[10px] text-slate-400">健康度 SOH / 满充</div>
+            <div class="text-base sm:text-lg font-bold font-mono text-cyan-300 mt-0.5" id="pwr-bat-soh">--%</div>
+            <div class="text-[10px] text-slate-500 font-mono" id="pwr-bat-mah">4500 mAh</div>
           </div>
         </div>
+        <div id="pwr-bat-detail" class="text-xs text-slate-400 bg-slate-900/50 border border-slate-800/70 rounded-xl px-3.5 py-2 font-mono">正在读取底层充放电与旁路寄存器状态...</div>
       </div>
 
       <!-- 全机 8 路硬件热敏传感器实时温控矩阵 -->
@@ -1320,23 +1332,49 @@
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div class="glass-card rounded-2xl p-5 space-y-4">
-          <h3 class="font-semibold text-white pb-3 border-b border-slate-800">电池保养与长效续航</h3>
-          <div class="space-y-3 text-xs">
+          <div class="flex items-center justify-between pb-3 border-b border-slate-800">
             <div>
-              <div class="flex justify-between mb-1">
-                <span class="text-slate-400">充电上限保护 (防止长期插电鼓包)</span>
-                <span class="text-cyan-400 font-mono font-bold" id="txt-charge-cap">80%</span>
-              </div>
-              <input type="range" id="range-charge-cap" min="50" max="100" value="80" oninput="document.getElementById('txt-charge-cap').innerText = this.value + '%'" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+              <h3 class="font-semibold text-white">电池防鼓包养护与零循环旁路</h3>
+              <p class="text-[11px] text-slate-400 mt-0.5">到达上限停充后自动切入 1.5A 直供旁路 (0mA 零循环)，充电阶段采用 0.24C 低温柔充</p>
+            </div>
+          </div>
+          <div class="space-y-3.5 text-xs">
+            <div class="grid grid-cols-2 gap-2.5">
+              <button onclick="applyPowerPreset('preset_server_60')" id="btn-preset-60" class="p-2.5 rounded-xl bg-slate-900/80 hover:bg-emerald-500/15 border border-slate-800 hover:border-emerald-500/40 text-left transition">
+                <div class="font-semibold text-emerald-400">长期插电养护 (推荐)</div>
+                <div class="text-[10px] text-slate-400 mt-0.5 font-mono">60% 停充 · &lt;50% 补电 (≈3.90V)</div>
+              </button>
+              <button onclick="applyPowerPreset('preset_portable_80')" id="btn-preset-80" class="p-2.5 rounded-xl bg-slate-900/80 hover:bg-cyan-500/15 border border-slate-800 hover:border-cyan-500/40 text-left transition">
+                <div class="font-semibold text-cyan-400">日常随身均衡</div>
+                <div class="text-[10px] text-slate-400 mt-0.5 font-mono">80% 停充 · &lt;70% 补电 (兼顾续航)</div>
+              </button>
             </div>
             <div>
               <div class="flex justify-between mb-1">
-                <span class="text-slate-400">低电量自动省电阈值</span>
+                <span class="text-slate-400">充电上限保护 (CHARGE_TO)</span>
+                <span class="text-cyan-400 font-mono font-bold" id="txt-charge-cap">80%</span>
+              </div>
+              <input type="range" id="range-charge-cap" min="50" max="100" value="80" oninput="onChargeCapInput(this.value)" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-cyan-500">
+            </div>
+            <div>
+              <div class="flex justify-between mb-1">
+                <span class="text-slate-400">恢复充电阈值 (RESUME_AT 宽幅滞回防微循环)</span>
+                <span class="text-emerald-400 font-mono font-bold" id="txt-resume-cap">70%</span>
+              </div>
+              <input type="range" id="range-resume-cap" min="40" max="95" value="70" oninput="document.getElementById('txt-resume-cap').innerText = this.value + '%'" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-emerald-500">
+            </div>
+            <div>
+              <div class="flex justify-between mb-1">
+                <span class="text-slate-400">纯电池低电量省电阈值 (SAVER_BELOW)</span>
                 <span class="text-amber-400 font-mono font-bold" id="txt-saver-cap">20%</span>
               </div>
               <input type="range" id="range-saver-cap" min="5" max="40" value="20" oninput="document.getElementById('txt-saver-cap').innerText = this.value + '%'" class="w-full h-1.5 bg-slate-800 rounded-lg appearance-none cursor-pointer accent-amber-500">
             </div>
-            <button onclick="savePowerConfig()" class="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs rounded-xl transition">保存电源保护配置</button>
+            <div class="grid grid-cols-2 gap-2.5 pt-0.5">
+              <button onclick="toggleFullOnceCharge()" id="btn-full-once" class="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium transition">出门前单次充满 100%</button>
+              <button onclick="toggleManualChargePause()" id="btn-pause-charge" class="py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-medium transition">手动停充直供</button>
+            </div>
+            <button onclick="savePowerConfig()" class="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs rounded-xl transition">保存自定义阈值并立即生效</button>
           </div>
         </div>
 
@@ -3716,11 +3754,50 @@
           const bData = await bResp.json();
           if (bData.ok && bData.data) {
             const b = bData.data;
+            window._lastBatState = b;
             if (document.getElementById('pwr-bat-cap')) document.getElementById('pwr-bat-cap').innerText = b.capacity == null ? '—' : b.capacity + '%';
-            if (document.getElementById('pwr-bat-volt')) document.getElementById('pwr-bat-volt').innerText = b.voltage_v == null ? '—' : b.voltage_v + ' V';
-            if (document.getElementById('pwr-bat-source')) document.getElementById('pwr-bat-source').innerText = b.plugged === true ? 'USB / Type-C' : (b.plugged === false ? '内置锂电' : '未知');
-            if (document.getElementById('pwr-bat-temp') && b.temp_c !== undefined) {
+            if (document.getElementById('pwr-bat-volt')) document.getElementById('pwr-bat-volt').innerText = b.voltage_v == null ? '—' : Number(b.voltage_v).toFixed(3) + ' V';
+            const currEl = document.getElementById('pwr-bat-curr');
+            const pwrEl = document.getElementById('pwr-bat-pwr');
+            if (currEl) {
+              if (b.current_ma == null) {
+                currEl.innerText = '—';
+                if (pwrEl) pwrEl.innerText = '--';
+              } else if (b.plugged && Math.abs(b.current_ma) <= 2 && b.charging === false) {
+                currEl.innerText = '0 mA';
+                currEl.className = 'text-base sm:text-lg font-bold font-mono text-cyan-300 mt-0.5';
+                if (pwrEl) pwrEl.innerText = '零循环直供旁路';
+              } else {
+                const sign = b.current_ma > 0 ? '+' : '';
+                currEl.innerText = `${sign}${b.current_ma} mA`;
+                currEl.className = 'text-base sm:text-lg font-bold font-mono mt-0.5 ' + (b.current_ma > 0 ? 'text-emerald-400' : 'text-amber-400');
+                if (pwrEl) pwrEl.innerText = b.power_mw != null ? `${(Math.abs(b.power_mw) / 1000).toFixed(2)} W` : '--';
+              }
+            }
+            if (document.getElementById('pwr-bat-source')) {
+              const ut = b.usb_type ? ` (${b.usb_type})` : '';
+              document.getElementById('pwr-bat-source').innerText = b.plugged === true ? `插电${ut}` : (b.plugged === false ? '内置锂电' : '未知');
+            }
+            if (document.getElementById('pwr-bat-ilim')) {
+              if (b.plugged && b.input_limit_ma) {
+                const ichg = b.charging && b.charge_current_limit_ma ? ` · 充${b.charge_current_limit_ma}mA` : '';
+                document.getElementById('pwr-bat-ilim').innerText = `输入 ${b.input_limit_ma}mA${ichg}`;
+              } else {
+                document.getElementById('pwr-bat-ilim').innerText = b.plugged ? 'USB 供电在线' : '电池独立放电';
+              }
+            }
+            if (document.getElementById('pwr-bat-temp') && b.temp_c !== undefined && b.temp_c !== null) {
               document.getElementById('pwr-bat-temp').innerText = Number(b.temp_c).toFixed(1) + '°C';
+            }
+            if (document.getElementById('pwr-bat-soh')) {
+              document.getElementById('pwr-bat-soh').innerText = b.soh_pct != null ? `${b.soh_pct}%` : '良好';
+            }
+            if (document.getElementById('pwr-bat-mah')) {
+              if (b.charge_full_mah && b.charge_design_mah) {
+                document.getElementById('pwr-bat-mah').innerText = `${b.charge_full_mah} / ${b.charge_design_mah}mAh`;
+              } else {
+                document.getElementById('pwr-bat-mah').innerText = '4500 mAh';
+              }
             }
             renderBatteryStatus(b, 'pwr');
             const thmGrid = document.getElementById('pwr-thermal-grid');
@@ -3751,15 +3828,40 @@
       const res = await apiCall('power.get');
       if (res && res.ok) {
         const conf = res.conf || res;
-        const chargeTo = conf.CHARGE_TO !== undefined ? conf.CHARGE_TO : res.charge_to;
-        const saverBelow = conf.SAVER_BELOW !== undefined ? conf.SAVER_BELOW : res.saver_below;
-        if (chargeTo && document.getElementById('range-charge-cap')) {
+        const chargeTo = Number(conf.CHARGE_TO !== undefined ? conf.CHARGE_TO : (res.charge_to || 80));
+        const rawResume = Number(conf.RESUME_AT !== undefined ? conf.RESUME_AT : (res.resume_at || 0));
+        const resumeAt = rawResume > 0 ? rawResume : Math.max(40, chargeTo - 5);
+        const saverBelow = Number(conf.SAVER_BELOW !== undefined ? conf.SAVER_BELOW : (res.saver_below || 20));
+        const fullOnce = Number(conf.FULL_ONCE !== undefined ? conf.FULL_ONCE : (res.full_once || 0)) === 1;
+        const paused = Number(conf.CHARGE_PAUSE !== undefined ? conf.CHARGE_PAUSE : (res.charge_pause || 0)) === 1;
+        window._powerConfState = { chargeTo, resumeAt, saverBelow, fullOnce, paused };
+
+        if (document.getElementById('range-charge-cap')) {
           document.getElementById('range-charge-cap').value = chargeTo;
           document.getElementById('txt-charge-cap').innerText = chargeTo + '%';
         }
-        if (saverBelow && document.getElementById('range-saver-cap')) {
+        if (document.getElementById('range-resume-cap')) {
+          document.getElementById('range-resume-cap').value = resumeAt;
+          document.getElementById('txt-resume-cap').innerText = (chargeTo >= 100 ? '自动' : resumeAt + '%');
+        }
+        if (document.getElementById('range-saver-cap')) {
           document.getElementById('range-saver-cap').value = saverBelow;
           document.getElementById('txt-saver-cap').innerText = saverBelow + '%';
+        }
+        const btn60 = document.getElementById('btn-preset-60');
+        const btn80 = document.getElementById('btn-preset-80');
+        if (btn60) btn60.className = 'p-2.5 rounded-xl text-left transition border ' + (chargeTo === 60 && resumeAt === 50 && !paused ? 'bg-emerald-500/15 border-emerald-500/60' : 'bg-slate-900/80 hover:bg-emerald-500/15 border-slate-800 hover:border-emerald-500/40');
+        if (btn80) btn80.className = 'p-2.5 rounded-xl text-left transition border ' + (chargeTo === 80 && (resumeAt === 70 || rawResume === 0) && !paused ? 'bg-cyan-500/15 border-cyan-500/60' : 'bg-slate-900/80 hover:bg-cyan-500/15 border-slate-800 hover:border-cyan-500/40');
+
+        const btnFull = document.getElementById('btn-full-once');
+        if (btnFull) {
+          btnFull.innerText = fullOnce ? '取消单次充满 (恢复限充)' : '出门前单次充满 100%';
+          btnFull.className = 'py-2 px-3 rounded-xl font-medium transition border ' + (fullOnce ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300' : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200');
+        }
+        const btnPause = document.getElementById('btn-pause-charge');
+        if (btnPause) {
+          btnPause.innerText = paused ? '恢复自动充电护航' : '手动停充直供';
+          btnPause.className = 'py-2 px-3 rounded-xl font-medium transition border ' + (paused ? 'bg-amber-500/20 border-amber-500/50 text-amber-300' : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-200');
         }
       }
 
@@ -3776,13 +3878,72 @@
       }
     }
 
+    function onChargeCapInput(val) {
+      const ct = parseInt(val) || 80;
+      document.getElementById('txt-charge-cap').innerText = ct + '%';
+      const resSlider = document.getElementById('range-resume-cap');
+      const resTxt = document.getElementById('txt-resume-cap');
+      if (resSlider && resTxt) {
+        if (ct >= 100) {
+          resTxt.innerText = '自动';
+        } else {
+          let ra = parseInt(resSlider.value) || 70;
+          if (ra >= ct - 2) {
+            ra = Math.max(40, ct - 10);
+            resSlider.value = ra;
+          }
+          resTxt.innerText = ra + '%';
+        }
+      }
+    }
+
+    async function applyPowerPreset(presetAction) {
+      showToast('正在切换电池养护模式...');
+      const res = await apiCall('power.control', { action: presetAction });
+      if (res && res.ok) {
+        showToast(res.msg || '电池养护模式已切换');
+        await loadPowerTab();
+      } else {
+        showToast('操作失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function toggleFullOnceCharge() {
+      const st = window._powerConfState || {};
+      const act = st.fullOnce ? 'cancel_full_once' : 'full_once';
+      const res = await apiCall('power.control', { action: act });
+      if (res && res.ok) {
+        showToast(res.msg || '操作已生效');
+        await loadPowerTab();
+      } else {
+        showToast('操作失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function toggleManualChargePause() {
+      const st = window._powerConfState || {};
+      const act = st.paused ? 'resume' : 'pause';
+      const res = await apiCall('power.control', { action: act });
+      if (res && res.ok) {
+        showToast(res.msg || '操作已生效');
+        await loadPowerTab();
+      } else {
+        showToast('操作失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
     async function savePowerConfig() {
       const chargeTo = parseInt(document.getElementById('range-charge-cap').value) || 80;
+      const resumeAt = chargeTo >= 100 ? 0 : (parseInt(document.getElementById('range-resume-cap').value) || Math.max(40, chargeTo - 10));
       const saverBelow = parseInt(document.getElementById('range-saver-cap').value) || 20;
-      showToast('正在保存电源管理配置...');
-      await apiCall('power.set', { key: 'CHARGE_TO', value: chargeTo });
-      await apiCall('power.set', { key: 'SAVER_BELOW', value: saverBelow });
-      showToast('电源保护配置已生效');
+      showToast('正在保存电池保护与滞回策略...');
+      const res = await apiCall('power.control', { charge_to: chargeTo, resume_at: resumeAt, saver_below: saverBelow });
+      if (res && res.ok) {
+        showToast('电池保护与滞回阈值已生效');
+        await loadPowerTab();
+      } else {
+        showToast('保存失败: ' + ((res && res.error) || ''), false);
+      }
     }
 
     async function saveCpuConfig() {
