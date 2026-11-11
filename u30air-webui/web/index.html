@@ -1406,7 +1406,7 @@
     <!-- 9. 系统 (SYSTEM) -->
     <!-- ========================================================================= -->
     <section id="panel-system" class="tab-panel space-y-5 hidden">
-      <!-- 顶部双栏：蓝牙硬件开关 (默认关闭) + Cockpit 备用控制台开关 -->
+      <!-- 顶部双栏：蓝牙硬件开关 (默认关闭) + 独立维护固件底座状态 -->
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <!-- 蓝牙硬件服务按需开关卡片 -->
         <div class="glass-card rounded-2xl p-5 space-y-4">
@@ -1428,25 +1428,21 @@
           </div>
         </div>
 
-        <!-- Cockpit 备用旧控制台启停控制卡片 -->
+        <!-- 独立维护固件底座状态卡片 -->
         <div class="glass-card rounded-2xl p-5 space-y-4">
           <div class="flex items-center justify-between gap-3 pb-3 border-b border-slate-800">
             <div>
               <h3 class="font-semibold text-white flex items-center gap-2">
-                <svg class="w-4 h-4 text-amber-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10.325 4.317c.426-1.756 2.924-1.756 3.35 0a1.724 1.724 0 002.573 1.066c1.543-.94 3.31.826 2.37 2.37a1.724 1.724 0 001.065 2.572c1.756.426 1.756 2.924 0 3.35a1.724 1.724 0 00-1.066 2.573c.94 1.543-.826 3.31-2.37 2.37a1.724 1.724 0 00-2.572 1.065c-.426 1.756-2.924 1.756-3.35 0a1.724 1.724 0 00-2.573-1.066c-1.543.94-3.31-.826-2.37-2.37a1.724 1.724 0 00-1.065-2.572c-1.756-.426-1.756-2.924 0-3.35a1.724 1.724 0 001.066-2.573c-.94-1.543.826-3.31 2.37-2.37.996.608 2.296.07 2.572-1.065z"></path><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15 12a3 3 0 11-6 0 3 3 0 016 0z"></path></svg>
-                Cockpit 备用旧控制台 (端口 9090)
+                <svg class="w-4 h-4 text-emerald-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12l2 2 4-4m5.618-4.016A11.955 11.955 0 0112 2.944a11.955 11.955 0 01-8.618 3.04A12.02 12.02 0 003 9c0 5.591 3.824 10.29 9 11.622 5.176-1.332 9-6.03 9-11.622 0-1.042-.133-2.052-.382-3.016z"></path></svg>
+                独立维护固件底座 (Standalone Baseline)
               </h3>
-              <p class="text-xs text-slate-400 mt-0.5">默认停止为您节省约 100MB 内存；仅在需要时临时开启</p>
+              <p class="text-xs text-slate-400 mt-0.5">已彻底移除旧版重型面板，由自研轻量控制台 (:8080, ~15MB) 独占托管</p>
             </div>
-            <span id="cockpit-status-badge" class="px-2.5 py-1 rounded text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700 shrink-0">已停止 (省电省内存)</span>
+            <span class="px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/15 text-emerald-400 border border-emerald-500/30 shrink-0">自主维护 · 更新已锁</span>
           </div>
-          <div class="flex items-center justify-between gap-3 pt-1">
-            <div class="text-xs text-slate-400">
-              访问入口: <a id="cockpit-link" href="https://192.168.78.1:9090/" target="_blank" class="text-indigo-400 underline">https://192.168.78.1:9090/</a>
-            </div>
-            <button onclick="toggleCockpitService()" id="btn-cockpit-toggle" class="px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition">
-              临时启动 Cockpit (9090)
-            </button>
+          <div class="flex flex-wrap items-center justify-between gap-2 pt-1 text-xs">
+            <div class="text-slate-400">黄金基线: <span class="text-slate-200 font-mono">Ubuntu 24.04 LTS · Linux 5.4.254 (v2026.10.27.2)</span></div>
+            <span class="text-slate-500 font-mono">SQC 0mA 旁路 + 改版 Mihomo</span>
           </div>
         </div>
       </div>
@@ -1805,7 +1801,7 @@
       if (tabId === 'wifi') loadWifiTab();
       if (tabId === 'vpn') loadFullVpnData();
       if (tabId === 'power') loadPowerTab();
-      if (tabId === 'system') { fetchSysLogs(); checkCockpitStatus(); checkBluetoothStatus(); loadLogStatus(); loadSysTab(); }
+      if (tabId === 'system') { fetchSysLogs(); checkBluetoothStatus(); loadLogStatus(); loadSysTab(); }
     }
 
     // 格式化函数
@@ -2781,44 +2777,6 @@
         box.scrollTop = box.scrollHeight;
       } else {
         box.innerText = '暂无运行日志';
-      }
-    }
-
-    // =========================================================================
-    // Cockpit 备用旧控制台按需控制 (解决用户内存顾虑)
-    // =========================================================================
-    async function checkCockpitStatus() {
-      try {
-        const resp = await fetch('/api/cockpit/status');
-        const res = await resp.json();
-        const badge = document.getElementById('cockpit-status-badge');
-        const btn = document.getElementById('btn-cockpit-toggle');
-
-        if (res.running) {
-          badge.innerText = '运行中 (端口 9090)';
-          badge.className = 'px-2.5 py-1 rounded text-xs font-semibold bg-emerald-500/20 text-emerald-400 border border-emerald-500/30';
-          btn.innerText = '停止 Cockpit (释放内存)';
-          btn.className = 'px-4 py-2 bg-rose-600 hover:bg-rose-500 text-white rounded-xl text-xs font-semibold transition';
-        } else {
-          badge.innerText = '已停止 (省电省内存)';
-          badge.className = 'px-2.5 py-1 rounded text-xs font-semibold bg-slate-800 text-slate-400 border border-slate-700';
-          btn.innerText = '临时启动 Cockpit (9090)';
-          btn.className = 'px-4 py-2 bg-slate-800 hover:bg-slate-700 text-slate-200 hover:text-white rounded-xl text-xs font-semibold border border-slate-700 transition';
-        }
-      } catch (e) {}
-    }
-
-    async function toggleCockpitService() {
-      showToast('正在变更 Cockpit 服务状态...');
-      try {
-        const resp = await fetch('/api/cockpit/toggle', { method: 'POST' });
-        const res = await resp.json();
-        if (res.ok) {
-          showToast(res.msg);
-          checkCockpitStatus();
-        }
-      } catch (e) {
-        showToast('请求失败', false);
       }
     }
 

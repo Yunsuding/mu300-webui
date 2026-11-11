@@ -59,6 +59,11 @@
 │       ├── u30air-webui.service    # WebUI systemd 服务定义
 │       ├── mihomo-affinity.conf    # Mihomo A76 大核亲和性 (CPU 4-7) Drop-in
 │       └── 10-mu300-journald.conf  # journald 8MB 内存/磁盘上限配置
+├── tools/                          # 刷机前新机校准分区冷备与自动应答辅助工具
+│   ├── backup_nv_windows.py        # 跨平台 ADB 导出并 SHA256 校验 29 个 IMEI/射频校准分区
+│   └── u30air-ubuntu2404-k54.answers.example
+├── docs/
+│   └── MANUAL_FLASH_GUIDE_CN.md    # 异机刷机安全规范与 Ubuntu 24.04 独立维护指南
 ├── install.sh                      # 设备端一键安装与优化脚本
 ├── uninstall.sh                    # 设备端一键卸载与还原脚本
 ├── deploy.py                       # PC 端通过 SFTP 一键远程部署脚本

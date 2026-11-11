@@ -1,0 +1,20 @@
+# ZTE U30 Air 刷入 Ubuntu 24.04 LTS + 厂商 5.4 内核 推荐应答模板
+# 用法（复制一份为 my.answers 并填入你的密码，刷完后立即删除 my.answers）：
+#   PowerShell: .\standalone\upstream-installer\install.ps1 -NoSelfUpdate -Release v2026.10.27.2 -AnswersFile .\my.answers
+#   Linux/macOS: MU300_NO_SELF_UPDATE=1 MU300_RELEASE=v2026.10.27.2 ./standalone/upstream-installer/install.sh --answers ./my.answers
+# 若直接解压离线包 mu300-magisk-v2026.10.27.2-ubuntu-24.04-k5.4.zip 运行里面的 start.cmd，则系统/版本/内核已自动固定，无需前几项问题。
+
+MU300_LANG=zh
+MU300_ANS_SYSTEMS=1
+MU300_ANS_UBUNTU=24.04
+MU300_ANS_KERNEL=5.4
+MU300_ANS_DEFAULT_LINUX=yes
+MU300_ANS_BOOT_ATTEMPTS=5
+MU300_ANS_HOTSPOT=yes
+MU300_ANS_GPU=no
+MU300_ANS_VPN=no
+MU300_ANS_ADB=no
+MU300_ANS_PANEL=no
+# 请将下方替换为你为新设备设置的 ubuntu 登录密码（至少 6 位）：
+MU300_ANS_PASSWORD=CHANGE_ME_PASSWORD
+MU300_ANS_CONFIRM=INSTALL
