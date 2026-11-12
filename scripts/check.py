@@ -55,14 +55,19 @@ def verify_python_syntax():
 
 
 def verify_webui_inline_js():
+    app_js = ROOT / "u30air-webui" / "web" / "app.js"
+    app_css = ROOT / "u30air-webui" / "web" / "app.css"
+    assert app_css.exists() and app_css.stat().st_size > 10000, "Missing or empty precompiled app.css"
+    subprocess.run(["node", "--check", str(app_js)], check=True)
     index_html = ROOT / "u30air-webui" / "web" / "index.html"
     parser = InlineScriptExtractor()
     parser.feed(index_html.read_text(encoding="utf-8"))
-    with tempfile.TemporaryDirectory(prefix="mu300-webui-js-") as temp:
-        js_file = Path(temp) / "inline.js"
-        js_file.write_text("\n".join(parser.parts), encoding="utf-8")
-        subprocess.run(["node", "--check", str(js_file)], check=True)
-    print("[OK] WebUI inline JavaScript syntax verified.")
+    if parser.parts:
+        with tempfile.TemporaryDirectory(prefix="mu300-webui-js-") as temp:
+            js_file = Path(temp) / "inline.js"
+            js_file.write_text("\n".join(parser.parts), encoding="utf-8")
+            subprocess.run(["node", "--check", str(js_file)], check=True)
+    print("[OK] WebUI modular JavaScript & precompiled CSS verified.")
 
 
 def verify_runtime_manifest():

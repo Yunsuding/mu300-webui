@@ -80,7 +80,8 @@ CORE_RUNTIME_FILES = [
 WEBUI_FILES = [
     (ROOT / "u30air-webui/server.py", "/opt/u30air-webui/server.py", 0o755),
     (ROOT / "u30air-webui/web/index.html", "/opt/u30air-webui/web/index.html", 0o644),
-    (ROOT / "u30air-webui/web/tailwindcss.js", "/opt/u30air-webui/web/tailwindcss.js", 0o644),
+    (ROOT / "u30air-webui/web/app.css", "/opt/u30air-webui/web/app.css", 0o644),
+    (ROOT / "u30air-webui/web/app.js", "/opt/u30air-webui/web/app.js", 0o644),
     (ROOT / "u30air-webui/service/u30air-webui.service", "/etc/systemd/system/u30air-webui.service", 0o644),
     (ROOT / "u30air-webui/bin/mu300-mihomo", "/usr/local/bin/mu300-mihomo", 0o755),
     (ROOT / "u30air-webui/bin/mu300-mihomo", "/opt/mu300/bin/mu300-mihomo", 0o755),

@@ -52,6 +52,6 @@ The offline flashing Release bundles (`mu300-kernel.tar.gz`, `mu300-ubuntu-rootf
 
 ---
 
-## 4. Tailwind CSS Play CDN Standalone Script (MIT License)
+## 4. Tailwind CSS Utility Stylesheet (MIT License)
 
-- `u30air-webui/web/tailwindcss.js`: https://github.com/tailwindlabs/tailwindcss — Licensed under the **MIT License** (`Copyright (c) Tailwind Labs, Inc.`).
+- `u30air-webui/web/app.css`: Precompiled offline utility stylesheet generated with Tailwind CSS (https://github.com/tailwindlabs/tailwindcss) — Licensed under the **MIT License** (`Copyright (c) Tailwind Labs, Inc.`).

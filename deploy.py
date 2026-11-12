@@ -85,7 +85,7 @@ def upload_tree(sftp: paramiko.SFTPClient, local_dir: Path, remote_dir: str):
                 continue
             l_path = Path(root) / fname
             r_path = f"{target_dir}/{fname}"
-            if fname.endswith((".py", ".sh", ".service", ".conf", ".html", ".js")) or "bin" in root:
+            if fname.endswith((".py", ".sh", ".service", ".conf", ".html", ".css", ".js")) or "bin" in root:
                 upload_text_lf(sftp, l_path, r_path)
             else:
                 sftp.put(str(l_path), r_path)

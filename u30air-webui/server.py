@@ -5150,7 +5150,9 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 STATIC_ASSET_CACHE[file_path] = entry
 
         inm = self.headers.get("If-None-Match", "") if hasattr(self, "headers") and self.headers else ""
-        cache_ctl = "public, max-age=604800" if file_path.endswith("tailwindcss.js") else "no-cache"
+        has_ver = ("?v=" in getattr(self, "path", "")) or ("&v=" in getattr(self, "path", ""))
+        is_static_asset = file_path.endswith((".css", ".js", ".woff2", ".png", ".ico", ".svg"))
+        cache_ctl = ("public, max-age=31536000, immutable" if has_ver else "public, max-age=604800") if is_static_asset else "no-cache"
         if inm and entry["etag"] in [x.strip() for x in inm.split(",")]:
             self.send_response(304)
             self.send_header("ETag", entry["etag"])
@@ -5320,14 +5322,28 @@ class WebUIHandler(BaseHTTPRequestHandler):
             return
 
         # 静态文件服务
+        web_root = os.path.realpath(WEB_DIR)
+        if path == "/favicon.ico" and not os.path.isfile(os.path.join(web_root, "favicon.ico")):
+            self.send_response(204)
+            self.send_header("Cache-Control", "public, max-age=86400")
+            self.end_headers()
+            return
+
         if path in ("/", "/index.html"):
-            file_path = os.path.join(WEB_DIR, "index.html")
+            file_path = os.path.join(web_root, "index.html")
         else:
-            rel_path = path.lstrip("/")
-            file_path = os.path.join(WEB_DIR, rel_path)
+            rel_path = os.path.normpath(path.lstrip("/"))
+            candidate = os.path.realpath(os.path.join(web_root, rel_path))
+            if candidate == web_root or not candidate.startswith(web_root + os.sep):
+                self.send_error(404, "File not found")
+                return
+            file_path = candidate
 
         if not os.path.exists(file_path) or os.path.isdir(file_path):
-            file_path = os.path.join(WEB_DIR, "index.html")
+            if path.lower().endswith((".js", ".css", ".map", ".ico", ".png", ".svg", ".woff2", ".json")):
+                self.send_error(404, "File not found")
+                return
+            file_path = os.path.join(web_root, "index.html")
 
         if os.path.exists(file_path) and os.path.isfile(file_path):
             self._serve_static_file(file_path)
