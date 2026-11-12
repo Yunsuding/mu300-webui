@@ -2645,18 +2645,19 @@ def drop_memory_caches():
     }
 
 def run_mu300_api(method, req=None):
-    """调用底层的 mu300-api（支持 sms.* / ussd.* 按卡槽透明透传 MU300_SIM_SLOT）"""
+    """调用底层的 mu300-api（支持 sms.* / ussd.* / at.* 按卡槽透明透传 MU300_SIM_SLOT 与 MU300_AT_DIR）"""
     if not os.path.exists(API_BIN):
         return {"ok": 0, "error": f"API binary {API_BIN} not found"}
     try:
         req_clean = dict(req) if isinstance(req, dict) else (req or {})
         env = None
-        if isinstance(req_clean, dict) and method.startswith(("sms.", "ussd.")) and "slot" in req_clean:
+        if isinstance(req_clean, dict) and method.startswith(("sms.", "ussd.", "at.")) and "slot" in req_clean:
             s_val = req_clean.pop("slot")
             if str(s_val) in ("1", "2"):
                 s_idx = int(s_val) - 1
                 env = dict(os.environ, MU300_SIM_SLOT=str(s_idx), MU300_AT_DIR=get_slot_at_dir(s_idx))
         payload = json.dumps(req_clean)
+        cmd_timeout = 95 if method.startswith(("ussd.", "sms.", "radio.", "sim.", "at.")) else 25
         proc = subprocess.Popen(
             [API_BIN, method],
             stdin=subprocess.PIPE,
@@ -2665,7 +2666,7 @@ def run_mu300_api(method, req=None):
             text=True,
             env=env,
         )
-        stdout, stderr = proc.communicate(input=payload, timeout=25)
+        stdout, stderr = proc.communicate(input=payload, timeout=cmd_timeout)
         for line in reversed(stdout.strip().split("\n")):
             line = line.strip()
             if line.startswith("{") and line.endswith("}"):
@@ -4770,6 +4771,8 @@ def handle_sim_comm_api(method, req_data):
         return {"ok": 1, "msg": "已发送提前切回指令，正在恢复主流量卡..."}
     if method == "sim.card_save":
         return save_sim_card_profile(req_data)
+    if method == "sim.set":
+        return run_mu300_api("sim.select", req_data)
 
     if method == "cellular.health":
         return get_cellular_health()

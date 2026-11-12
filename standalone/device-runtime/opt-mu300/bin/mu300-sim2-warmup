@@ -145,6 +145,23 @@ if [[ $start_rc == 7 ]]; then
 fi
 if [[ $start_rc != 0 ]]; then
     reason=$(head -c 40 /run/mu300/sim2-cold-start.reason 2>/dev/null | tr -cd 'a-z0-9-')
+    # When SIM1 (SLOT=0) itself is the boot slot and no card is inserted (or locked) before any radio command was sent,
+    # keep sim-hot=1 intact, bring Slot 0's protocol stack to CFUN=1 via radio-on, and re-arm dual-SIM live readiness.
+    if [[ "$SLOT" == 0 && ! -e /run/mu300/sim2-cold-start.sent ]] && [[ "$reason" == no-sim || "$reason" == sim-pin || "$reason" == sim-not-ready ]]; then
+        was_hot=$(sim_cfg_hot 2>/dev/null || echo 0)
+        say "SIM1 cold start saw $reason with nothing sent to radio: bringing up Slot 0 stack while keeping sim-hot=$was_hot"
+        rm -f /run/mu300/sim-managed /run/mu300-radio-freeze /run/mu300/sim2-radio-ready /run/mu300/sim-active-unknown "$PENDING"
+        if broker_ready /run/mu300-at; then
+            "$MD" radio-on || true
+        fi
+        if [[ "$was_hot" == 1 ]] && broker_ready /run/mu300-at && broker_ready /run/mu300-at2 && broker_ready /run/mu300-at4 && broker_ready /run/mu300-at5; then
+            : >/run/mu300-radio-freeze
+            : >/run/mu300/sim-managed
+            : >/run/mu300/sim-radio-ready
+            : >/run/mu300-ril-handshake
+        fi
+        exit 0
+    fi
     fallback "${reason:-cold-start-failed}"
 fi
 rm -f "$PENDING" /run/mu300/sim-active-unknown

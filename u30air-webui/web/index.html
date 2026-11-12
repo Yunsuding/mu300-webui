@@ -2050,22 +2050,39 @@
       setTimeout(() => toast.classList.add('translate-y-24', 'opacity-0'), 2800);
     }
 
+    function _legacyExecCopy(str) {
+      try {
+        const ta = document.createElement('textarea');
+        ta.value = String(str);
+        ta.setAttribute('readonly', '');
+        ta.style.position = 'fixed';
+        ta.style.top = '-9999px';
+        ta.style.left = '-9999px';
+        ta.style.opacity = '0';
+        document.body.appendChild(ta);
+        ta.focus();
+        ta.select();
+        ta.setSelectionRange(0, ta.value.length);
+        const ok = document.execCommand('copy');
+        document.body.removeChild(ta);
+        return !!ok;
+      } catch (e) {
+        return false;
+      }
+    }
+
     function copyToClipboard(text, label = 'IP 地址') {
       if (!text || text === '--' || text.includes('读取中')) return;
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(text).then(() => {
-          showToast(`已复制 ${label}: ${text}`);
-        }).catch(() => {
-          showToast(`复制失败`, false);
+      const done = () => showToast(`已复制 ${label}: ${text}`);
+      if (navigator.clipboard && window.isSecureContext && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(text).then(done).catch(() => {
+          if (_legacyExecCopy(text)) done();
+          else showToast('复制失败，请手动选中复制', false);
         });
+      } else if (_legacyExecCopy(text)) {
+        done();
       } else {
-        const ta = document.createElement('textarea');
-        ta.value = text;
-        document.body.appendChild(ta);
-        ta.select();
-        document.execCommand('copy');
-        document.body.removeChild(ta);
-        showToast(`已复制 ${label}: ${text}`);
+        window.prompt(`请复制 ${label}:`, text);
       }
     }
 
@@ -3328,11 +3345,21 @@
       }
     }
 
-    function copyText(txt) {
-      if (navigator.clipboard && navigator.clipboard.writeText) {
-        navigator.clipboard.writeText(txt);
+    function copyText(txt, label = '') {
+      if (!txt) return;
+      const str = String(txt);
+      const disp = str.length > 14 ? `${str.slice(0, 6)}••••••${str.slice(-4)} (完整 ${str.length} 位)` : str;
+      const msg = label ? `已复制${label}: ${disp}` : `已复制: ${disp}`;
+      if (navigator.clipboard && window.isSecureContext && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(str).then(() => showToast(msg)).catch(() => {
+          if (_legacyExecCopy(str)) showToast(msg);
+          else window.prompt('请手动复制:', str);
+        });
+      } else if (_legacyExecCopy(str)) {
+        showToast(msg);
+      } else {
+        window.prompt('请手动复制:', str);
       }
-      showToast(`已复制: ${txt}`);
     }
 
     async function sendSms() {
@@ -4023,7 +4050,7 @@
     }
 
     async function setDefaultSimSlot(slotNum) {
-      const res = await apiCall('sim.set', { slot: slotNum });
+      const res = await apiCall('sim.select', { slot: slotNum });
       if (res && res.ok) {
         showToast(`已将 SIM ${slotNum} 设为开机默认主卡`);
         loadSimOverview(false);

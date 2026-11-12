@@ -1995,8 +1995,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 3725,
-      "sha256": "f9442dfdae8cf86b6eab7bb80057da77d68642091f8ba0d761c12a036ad73ea9"
+      "size": 4150,
+      "sha256": "99bed7e67d2ede21fe171a87bb9205150e1eaf354ea9665b4e2bd64a383eb9d5"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-sim-radio",
@@ -2045,8 +2045,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 10054,
-      "sha256": "c44a2ffe4217724eef7e23caba91c7fb7e4a6a57b4df44b1fbba5fb2aa5f3102"
+      "size": 11201,
+      "sha256": "539e65c3c280c36fdfd51bd96ead3d0ad830cb010693bb82e92c3009e83a2f59"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-sms-forward",
