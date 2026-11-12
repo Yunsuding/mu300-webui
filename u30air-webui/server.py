@@ -37,9 +37,12 @@ try:
 except ImportError:
     fcntl = None
 
+import warnings
 try:
-    import spwd
-    import crypt
+    with warnings.catch_warnings():
+        warnings.simplefilter("ignore", DeprecationWarning)
+        import spwd
+        import crypt
 except ImportError:
     spwd = None
     crypt = None
@@ -5063,6 +5066,11 @@ class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     request_queue_size = 64
 
 class WebUIHandler(BaseHTTPRequestHandler):
+    def handle_one_request(self):
+        try:
+            super().handle_one_request()
+        except (BrokenPipeError, ConnectionResetError):
+            self.close_connection = True
     def get_token_from_request(self):
         # 1. 尝试从 Authorization: Bearer <token> 获取
         auth_hdr = self.headers.get("Authorization", "")

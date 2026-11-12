@@ -73,7 +73,10 @@ async function checkAuthStatus() {
       isAuthed = true;
       document.getElementById('login-modal').classList.add('hidden');
       document.getElementById('top-user-name').innerText = data.username || 'ubuntu';
+      fetchOverview();
+      pollRealtimeNet();
       startPolling();
+      requestAnimationFrame(renderTrafficChart);
     } else {
       handleAuthRequired();
     }
@@ -253,7 +256,9 @@ document.addEventListener('visibilitychange', () => {
     stopPolling();
   } else if (isAuthed) {
     fetchOverview();
+    pollRealtimeNet();
     startPolling();
+    requestAnimationFrame(renderTrafficChart);
   }
 });
 
@@ -618,6 +623,10 @@ async function pollRealtimeNet() {
   isPollingRealtimeNet = true;
   try {
     const resp = await fetch('/api/realtime_net');
+    if (resp.status === 401) {
+      handleAuthRequired();
+      return;
+    }
     if (resp.ok) {
       const res = await resp.json();
       if (res.ok) {
@@ -3585,8 +3594,14 @@ async function checkUpdate() {
 }
 
 setInterval(renderTrafficChart, 1000);
+window.addEventListener('resize', () => requestAnimationFrame(renderTrafficChart));
 
-window.addEventListener('DOMContentLoaded', () => {
+function initWebUI() {
   checkAuthStatus();
   renderTrafficChart();
-});
+}
+if (document.readyState === 'loading') {
+  window.addEventListener('DOMContentLoaded', initWebUI, { once: true });
+} else {
+  initWebUI();
+}
