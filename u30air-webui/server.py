@@ -1524,6 +1524,32 @@ def verify_system_password(username, password):
             return False
     return False
 
+def update_system_password(username, new_password):
+    """通过 Linux chpasswd 原生更新系统用户密码 (同步生效于 SSH / sudo 与 Web 面板)"""
+    if not username or not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", str(username)):
+        return False, "无效的系统用户名"
+    if not new_password or any(c in new_password for c in ("\n", "\r", "\x00")):
+        return False, "新密码不能包含换行或控制字符"
+    chpasswd_bin = "/usr/sbin/chpasswd"
+    if not os.path.exists(chpasswd_bin):
+        chpasswd_bin = "/sbin/chpasswd" if os.path.exists("/sbin/chpasswd") else "chpasswd"
+    try:
+        proc = subprocess.run(
+            [chpasswd_bin],
+            input=f"{username}:{new_password}\n",
+            text=True,
+            capture_output=True,
+            timeout=10,
+        )
+        if proc.returncode != 0:
+            detail = (proc.stderr or proc.stdout or "").strip()
+            return False, f"系统改密执行失败: {detail or f'exit {proc.returncode}'}"
+        if spwd and crypt and not verify_system_password(username, new_password):
+            return False, "密码写入后校验未通过，请重试"
+        return True, "密码已更新"
+    except Exception as e:
+        return False, f"调用 chpasswd 异常: {e}"
+
 def get_system_version():
     """读取当前底层系统真实版本 (固件镜像与发布版本)"""
     for p in ["/etc/mu300/image-version", "/etc/mu300/release"]:
@@ -4957,6 +4983,77 @@ def handle_logout_request(token):
         save_sessions()
     return "u30_session=; Path=/; Max-Age=0; SameSite=Lax; HttpOnly"
 
+def handle_password_change_request(client_ip, current_token, username, req_json):
+    now = time.time()
+    with STATE_LOCK:
+        fail_rec = dict(LOGIN_FAILURES.get(client_ip, {"count": 0, "until": 0}))
+    if fail_rec["until"] > now:
+        wait_s = max(1, int(fail_rec["until"] - now))
+        return 429, {"ok": 0, "error": f"密码错误次数过多，请等待 {wait_s} 秒后再试"}, None
+
+    if not username or not re.fullmatch(r"[a-z_][a-z0-9_-]{0,31}", str(username)):
+        return 400, {"ok": 0, "error": "当前登录账号无效"}, None
+
+    old_password = str(req_json.get("old_password", ""))
+    new_password = str(req_json.get("new_password", ""))
+    confirm_password = str(req_json.get("confirm_password", new_password))
+
+    if not old_password:
+        return 400, {"ok": 0, "error": "请输入当前密码"}, None
+    if len(new_password) < 6:
+        return 400, {"ok": 0, "error": "新密码长度至少需要 6 位"}, None
+    if len(new_password) > 128:
+        return 400, {"ok": 0, "error": "新密码长度不能超过 128 位"}, None
+    if any(c in new_password for c in ("\n", "\r", "\x00")):
+        return 400, {"ok": 0, "error": "新密码不能包含换行或控制字符"}, None
+    if new_password != confirm_password:
+        return 400, {"ok": 0, "error": "两次输入的新密码不一致"}, None
+    if new_password == old_password:
+        return 400, {"ok": 0, "error": "新密码不能与当前密码相同"}, None
+
+    if not verify_system_password(username, old_password):
+        with STATE_LOCK:
+            cur = LOGIN_FAILURES.get(client_ip, {"count": 0, "until": 0})
+            cnt = int(cur.get("count", 0)) + 1
+            LOGIN_FAILURES[client_ip] = {
+                "count": cnt,
+                "until": (now + 60) if cnt >= 5 else 0
+            }
+        return 403, {"ok": 0, "error": "当前密码不正确"}, None
+
+    ok, msg = update_system_password(username, new_password)
+    if not ok:
+        return 500, {"ok": 0, "error": msg}, None
+
+    new_token = secrets.token_hex(32)
+    revoked_others = 0
+    duration = 30 * 86400
+    with STATE_LOCK:
+        LOGIN_FAILURES.pop(client_ip, None)
+        cur_sess = SESSIONS.get(current_token) if current_token else None
+        if cur_sess:
+            rem = int(cur_sess.get("expire", now + 86400) - now)
+            duration = max(86400, min(30 * 86400, rem))
+        stale_tokens = [k for k, v in SESSIONS.items() if v.get("user") == username]
+        for k in stale_tokens:
+            if k != current_token:
+                revoked_others += 1
+            SESSIONS.pop(k, None)
+        SESSIONS[new_token] = {
+            "user": username,
+            "expire": time.time() + duration
+        }
+    save_sessions()
+    cookie = f"u30_session={new_token}; Path=/; Max-Age={duration}; SameSite=Lax; HttpOnly"
+    print(f"[Auth] 用户 {username} 已修改系统与面板密码 (吊销其他会话 {revoked_others} 个)")
+    return 200, {
+        "ok": 1,
+        "username": username,
+        "token": new_token,
+        "revoked_sessions": revoked_others,
+        "msg": f"系统与面板密码已同步更新（已清理其他登录会话 {revoked_others} 个）"
+    }, cookie
+
 class ThreadedHTTPServer(ThreadingMixIn, HTTPServer):
     daemon_threads = True
     allow_reuse_address = True
@@ -5252,6 +5349,18 @@ class WebUIHandler(BaseHTTPRequestHandler):
             token = self.get_token_from_request()
             cookie = handle_logout_request(token)
             self.send_json({"ok": 1}, set_cookie=cookie)
+            return
+
+        # 2.1 修改系统与面板密码端点 (同步更新 Linux / SSH 密码并吊销旧会话)
+        if path == "/api/auth/password":
+            auth_ok, username = self.is_authenticated()
+            if not auth_ok:
+                self.send_json({"ok": 0, "error": "unauthorized", "detail": "登录状态已失效，请重新登录"}, code=401)
+                return
+            client_ip = self.client_address[0] if self.client_address else "unknown"
+            token = self.get_token_from_request()
+            code, resp_obj, cookie = handle_password_change_request(client_ip, token, username, req_json)
+            self.send_json(resp_obj, code=code, set_cookie=cookie)
             return
 
         # 3. Cockpit 启停切换端点
