@@ -19,8 +19,12 @@ sim_cfg_default() {
 sim_cfg_hot() {
     local hot
     [ "${SIM_CONFIG_U30:-0}" = 1 ] || { echo 0; return 0; }
-    if hot=$(uci -q get network.wan.sim_hot); then :
-    else hot=$(cat "$sim_config_root/etc/mu300-sim-hot" 2>/dev/null || true); fi
+    if command -v uci >/dev/null 2>&1 && hot=$(uci -q get network.wan.sim_hot); then :
+    elif [ -s "$sim_config_root/etc/mu300/sim-hot" ]; then
+        hot=$(cat "$sim_config_root/etc/mu300/sim-hot" 2>/dev/null || true)
+    else
+        hot=$(cat "$sim_config_root/etc/mu300-sim-hot" 2>/dev/null || true)
+    fi
     hot=${hot:-0}
     case "$hot" in 0|1) printf '%s\n' "$hot";; *) echo 'Invalid SIM hot-switch policy' >&2; return 1;; esac
 }
@@ -72,9 +76,16 @@ sim_cfg_save_card() {
     fi
 }
 sim_cfg_save_hot() {
+    local tmp
     sim_cfg_valid "$1" || return 1
-    [ "${SIM_CONFIG_U30:-0}" = 1 ] && command -v uci >/dev/null 2>&1 || return 1
-    sim_cfg_write sim_hot "$1"
+    [ "${SIM_CONFIG_U30:-0}" = 1 ] || return 1
+    if command -v uci >/dev/null 2>&1; then
+        sim_cfg_write sim_hot "$1"
+    else
+        mkdir -p "$sim_config_root/etc/mu300" || return 1
+        tmp=$(mktemp "$sim_config_root/etc/mu300/sim-hot.XXXXXX") || return 1
+        printf '%s\n' "$1" > "$tmp" && mv -f "$tmp" "$sim_config_root/etc/mu300/sim-hot"
+    fi
 }
 sim_cfg_unstage_added() {
     local key
@@ -150,7 +161,11 @@ sim_seen_add() {
 # (network.wan.sim_data_wait, 300 by default; 0: never give it up). Anything else is the default.
 sim_cfg_data_wait() {
     local wait
-    wait=$(uci -q get network.wan.sim_data_wait 2>/dev/null || true)
+    if command -v uci >/dev/null 2>&1; then
+        wait=$(uci -q get network.wan.sim_data_wait 2>/dev/null || true)
+    else
+        wait=$(cat "$sim_config_root/etc/mu300/sim-data-wait" 2>/dev/null || true)
+    fi
     case $wait in ''|*[!0-9]*|??????*) wait=300 ;; esac
     printf '%s\n' "$wait"
 }
@@ -158,26 +173,37 @@ sim_cfg_data_wait() {
 # the two cases where nothing else brings the data back: a radio left in an unknown state, and a second card that
 # was given up after the radio had been told to start it. With 0 those stay as they are until somebody reboots.
 sim_cfg_auto_restart() {
-    if [ "$(uci -q get network.wan.sim_restart 2>/dev/null || true)" = 0 ]; then echo 0; else echo 1; fi
+    local v
+    if command -v uci >/dev/null 2>&1; then
+        v=$(uci -q get network.wan.sim_restart 2>/dev/null || true)
+    else
+        v=$(cat "$sim_config_root/etc/mu300/sim-restart" 2>/dev/null || true)
+    fi
+    if [ "$v" = 0 ]; then echo 0; else echo 1; fi
 }
-# sim_wan_up BEARER: netifd has the wan up, on BEARER, with an address. Reads netifd's status; no AT command.
+# sim_wan_up BEARER: netifd (OpenWrt) or systemd mobile-data (Ubuntu) has the bearer up with a global address.
 sim_wan_up() {
     local st
-    st=$(ubus call network.interface.wan status 2>/dev/null | tr -d ' \n\t') || return 1
-    case $st in *'"up":true'*) ;; *) return 1 ;; esac
-    case $st in *\"l3_device\":\"$1\"*|*\"device\":\"$1\"*) ;; *) return 1 ;; esac
-    case $st in *'"ipv4-address":[{'*|*'"ipv6-address":[{'*) return 0 ;; esac
+    if command -v ubus >/dev/null 2>&1 && [ -e "$sim_config_root/etc/openwrt_release" ]; then
+        st=$(ubus call network.interface.wan status 2>/dev/null | tr -d ' \n\t') || return 1
+        case $st in *'"up":true'*) ;; *) return 1 ;; esac
+        case $st in *\"l3_device\":\"$1\"*|*\"device\":\"$1\"*) ;; *) return 1 ;; esac
+        case $st in *'"ipv4-address":[{'*|*'"ipv6-address":[{'*) return 0 ;; esac
+        return 1
+    fi
+    ip -4 -o addr show dev "$1" scope global 2>/dev/null | grep -q 'inet ' && return 0
+    ip -6 -o addr show dev "$1" scope global 2>/dev/null | grep -q 'inet6 ' && return 0
     return 1
 }
-# sim_wan_held_down: somebody took the wan down and it stays down until somebody brings it up (ifdown, the page's
-# button): netifd's "autostart" is false then. Not the marker mobile-data leaves (/run/mu300-mobile-data-down): every
-# failed dial of netifd's own goes through a teardown that leaves it for a moment (measured: a boot check that
-# looked in that moment took a card netifd was dialling every minute for one nobody was dialling).
+# sim_wan_held_down: somebody took the wan down on purpose (OpenWrt: autostart=false; Ubuntu: /run/mu300/wan-user-down).
 sim_wan_held_down() {
     local st
-    st=$(ubus call network.interface.wan status 2>/dev/null | tr -d ' \n\t') || return 1
-    case $st in *'"autostart":false'*) return 0 ;; esac
-    return 1
+    if command -v ubus >/dev/null 2>&1 && [ -e "$sim_config_root/etc/openwrt_release" ]; then
+        st=$(ubus call network.interface.wan status 2>/dev/null | tr -d ' \n\t') || return 1
+        case $st in *'"autostart":false'*) return 0 ;; esac
+        return 1
+    fi
+    [ -e "$sim_config_root/run/mu300/wan-user-down" ]
 }
 # The data route. AT+SPSWDATA tells the modem which card carries packet data, and whether the modem forgets that
 # at a restart was never measured. So the dual-SIM path leaves this mark before it gives the route to the second

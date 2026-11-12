@@ -24,7 +24,17 @@
 set -u
 export PATH="$PATH:/opt/mu300/bin:/opt/mu300/busybox-bin:/usr/sbin:/sbin"
 
-DIR=${MU300_AT_DIR:-/run/mu300-at}
+SIM_SLOT=${MU300_SIM_SLOT:-}
+if [ -z "$SIM_SLOT" ] && [ -x /opt/mu300/bin/mu300-sim ]; then
+    SIM_SLOT=$(/opt/mu300/bin/mu300-sim active) || exit 1
+fi
+SIM_SLOT=${SIM_SLOT:-0}
+if [ -z "${MU300_AT_DIR:-}" ] && [ "$SIM_SLOT" = 1 ] && [ -p /run/mu300-at4/cmd ]; then
+    DIR=/run/mu300-at4
+else
+    DIR=${MU300_AT_DIR:-/run/mu300-at}
+fi
+export MU300_AT_DIR="$DIR"
 URCDIR=$DIR/urc
 AWK=${MU300_SMS_AWK:-/opt/mu300/lib/sms-pdu.awk}
 T=30
@@ -40,11 +50,7 @@ case "${1:-}" in
 esac
 code=$1
 
-# the unsolicited channel, which is where the answer will surface; nr1 is where the command goes
-SIM_SLOT=0
-if [ -x /opt/mu300/bin/mu300-sim ]; then
-    SIM_SLOT=$(/opt/mu300/bin/mu300-sim active) || exit 1
-fi
+# the unsolicited channel, which is where the answer will surface; nr1/nr4 is where the command goes
 CMDLOG=$URCDIR/$(basename "${MU300_AT_DEV:-/dev/stty_nr$((SIM_SLOT * 3 + 1))}").log
 URCLOG=$URCDIR/stty_nr$((SIM_SLOT * 3)).log
 

@@ -24,8 +24,22 @@ set -u
 export PATH="$PATH:/opt/mu300/bin:/opt/mu300/busybox-bin:/usr/sbin:/sbin"
 
 AWK=${MU300_SMS_AWK:-/opt/mu300/lib/sms-pdu.awk}
-STATE=${MU300_SMS_STATE:-/etc/mu300/sms}
-ATDIR=${MU300_AT_DIR:-/run/mu300-at}
+SIM_SLOT=${MU300_SIM_SLOT:-}
+if [ -z "$SIM_SLOT" ] && [ -x /opt/mu300/bin/mu300-sim ]; then
+    SIM_SLOT=$(/opt/mu300/bin/mu300-sim active 2>/dev/null || echo 0)
+fi
+SIM_SLOT=${SIM_SLOT:-0}
+if [ -z "${MU300_SMS_STATE:-}" ] && [ "$SIM_SLOT" = 1 ]; then
+    STATE=/etc/mu300/sms.slot1
+else
+    STATE=${MU300_SMS_STATE:-/etc/mu300/sms}
+fi
+if [ -z "${MU300_AT_DIR:-}" ] && [ "$SIM_SLOT" = 1 ] && [ -p /run/mu300-at4/cmd ]; then
+    ATDIR=/run/mu300-at4
+else
+    ATDIR=${MU300_AT_DIR:-/run/mu300-at}
+fi
+export MU300_AT_DIR="$ATDIR"
 CR=$(printf '\r')
 
 [ -f "$AWK" ] || { echo "sms: $AWK is missing" >&2; exit 1; }

@@ -3,7 +3,7 @@
   "source_image_version": "v2026.10.27.2",
   "kernel": "5.4.254-gb50db5b6224c",
   "captured_at": "20261112-003720",
-  "entry_count": 280,
+  "entry_count": 288,
   "entries": [
     {
       "device_path": "/etc/mu300/bluetooth.conf.example",
@@ -206,6 +206,16 @@
       "sha256": "5064c8182f02d42790a0d282733d3377062f05cd317bc2ada00fb8f7265d9162"
     },
     {
+      "device_path": "/etc/systemd/system/mu300-atd.service.d/u30air-slot0.conf",
+      "repo_path": "systemd/mu300-atd.service.d/u30air-slot0.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 124,
+      "sha256": "d9b10d7d84ce83305039a35e8351dddd09dd9c94b5714ea50d8323de8be4a4eb"
+    },
+    {
       "device_path": "/etc/systemd/system/mu300-atd2.service",
       "repo_path": "systemd/mu300-atd2.service",
       "mode": "0o644",
@@ -214,6 +224,36 @@
       "type": "file",
       "size": 606,
       "sha256": "42a3af73a5aeb8d6214d54eda3b2fe6ca2a2548e7196e84b1bcae7d49f5156a9"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-atd2.service.d/u30air-slot0.conf",
+      "repo_path": "systemd/mu300-atd2.service.d/u30air-slot0.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 189,
+      "sha256": "1b5a8536ed10988946b628f31f1381dff96e0f1031f3578cd86c10f2a550a548"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-atd4.service",
+      "repo_path": "systemd/mu300-atd4.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 569,
+      "sha256": "3f0735eb0865f9880b97dff0ed507e921f531200b0d7aedccd24577250a9b18b"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-atd5.service",
+      "repo_path": "systemd/mu300-atd5.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 596,
+      "sha256": "0ea987ab96d63fdce09f869953c237d4f9008e4644954070d9c9579178aacf82"
     },
     {
       "device_path": "/etc/systemd/system/mu300-bluetooth.service",
@@ -396,6 +436,16 @@
       "sha256": "518795f187a507c2ad61deabb23a34662c4d5b483f66f34f091fe5858eaed912"
     },
     {
+      "device_path": "/etc/systemd/system/mu300-mobile-data.service.d/fast-redial.conf",
+      "repo_path": "systemd/mu300-mobile-data.service.d/fast-redial.conf",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 196,
+      "sha256": "23ba300e16b660c1fa27a63ff0b57a88172447d41435dee85791f2b323d8fcda"
+    },
+    {
       "device_path": "/etc/systemd/system/mu300-modem-log.service",
       "repo_path": "systemd/mu300-modem-log.service",
       "mode": "0o644",
@@ -434,6 +484,26 @@
       "type": "file",
       "size": 689,
       "sha256": "c71554b408fc9b93d4cef31005e9dc344f06c8727d924e880ca6b0cade771ab0"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-sim-prepare.service",
+      "repo_path": "systemd/mu300-sim-prepare.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 387,
+      "sha256": "0611c0870689af295fd0c2da7b86432b4f7b810cf880373c2fe6a9c6f5254454"
+    },
+    {
+      "device_path": "/etc/systemd/system/mu300-sim-warmup.service",
+      "repo_path": "systemd/mu300-sim-warmup.service",
+      "mode": "0o644",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 594,
+      "sha256": "49b3fe1dddd52c4ffb08a6ccc4d141ba6f083a21e38a5605ea201845b043b807"
     },
     {
       "device_path": "/etc/systemd/system/mu300-sms-forward.service",
@@ -1665,8 +1735,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 119084,
-      "sha256": "5c16898539eb7f280967a0dc7d0394902a4ed67420f4072181884236c98030af"
+      "size": 119048,
+      "sha256": "2ed8b3f0e42c4860974eed3e5bf072e1ac53809feea589f14ee217cd5f3ff752"
     },
     {
       "device_path": "/opt/mu300/bin/modem-log-drain",
@@ -1695,8 +1765,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 96993,
-      "sha256": "38d8e2b99ac56932cf723725fe32fe42484c6cc73312c53439fee849abed68e8"
+      "size": 98744,
+      "sha256": "a74b6df4dfeba4d5f10cd73a3dc541ac31326f6c73fb526264d583262cb401e2"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-at",
@@ -1915,8 +1985,18 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 16217,
-      "sha256": "dd892e3a6e2dc494d3bf74269cfe4f3672cb8f7bc8f351e4ae92422aa25fa886"
+      "size": 16179,
+      "sha256": "cfe911f829d7523b57fc356091d62ac2d07f9eba8b43215f9e87740e806dbfe5"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-sim-boot-prep",
+      "repo_path": "opt-mu300/bin/mu300-sim-boot-prep",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 3725,
+      "sha256": "f9442dfdae8cf86b6eab7bb80057da77d68642091f8ba0d761c12a036ad73ea9"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-sim-radio",
@@ -1945,8 +2025,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 25226,
-      "sha256": "7a04a7948bb7f881d3e912760a2051462af8201313758a73eb4567dfd0af1062"
+      "size": 25693,
+      "sha256": "a7592d2e41a07a3e43775401ef8a08f8c39805061c8d66fa3ac15a6630457c51"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-sim2-start",
@@ -1955,8 +2035,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 10913,
-      "sha256": "4b8d602276384162be74a13dbbe6186703c03390b8ce6202323ba0a1cc7710f5"
+      "size": 10871,
+      "sha256": "47ed02b6501df924bf534a9a26684a860344727f4600d8585cf13b0929918b4a"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-sim2-warmup",
@@ -1965,8 +2045,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 9944,
-      "sha256": "227f2b32949af1886da8f2081cf51eed5471b599999300a544741d14fc956de7"
+      "size": 10054,
+      "sha256": "c44a2ffe4217724eef7e23caba91c7fb7e4a6a57b4df44b1fbba5fb2aa5f3102"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-sms-forward",
@@ -2075,8 +2155,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 4124,
-      "sha256": "5f49c4011abe4ad4124505a465699217bf313981bdf9b820b9c4198538318d25"
+      "size": 4342,
+      "sha256": "05b63df29c44f8d1c44dc218fce6ea42fa4001c1f9803f7c533490793e18d8e3"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-vpn",
@@ -2174,8 +2254,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 16880,
-      "sha256": "bdd3fe96ab4abf1927b7a9d17609426948dbe7904b33694b009b6c452ed82394"
+      "size": 17328,
+      "sha256": "3d10a609893eb51634526d7ff13952c6a39a6a61f98d5191934beca7ed877ed2"
     },
     {
       "device_path": "/opt/mu300/bin/thermal-guard",
@@ -2360,8 +2440,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 9476,
-      "sha256": "8c1f4420954ea811dbf4e7a4d4b3051d6dcba6ffa6df6130f626709f00920aaa"
+      "size": 10391,
+      "sha256": "7430200f0ba9bcfce860f1f2e9416c52f1b222aedaf17a9dcec1fcc02bf864a9"
     },
     {
       "device_path": "/opt/mu300/lib/sms-forward-http.sh",

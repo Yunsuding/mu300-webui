@@ -502,20 +502,106 @@
     </section>
 
     <!-- ========================================================================= -->
-    <!-- 2. 移动网络 (NETWORK) -->
+    <!-- 2. 移动网络 (NETWORK & DUAL-SIM CONTROL CENTER) -->
     <!-- ========================================================================= -->
     <section id="panel-network" class="tab-panel space-y-5 hidden">
+      <!-- 顶部：Vonode 风格 5 步端到端蜂窝链路健康诊断 & 快速动作栏 -->
+      <div id="net-health-card" class="glass-card rounded-2xl p-4 sm:p-5 space-y-3.5">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+          <div class="flex flex-wrap items-center gap-2.5">
+            <h3 class="font-semibold text-white text-sm sm:text-base flex items-center gap-2">
+              <span class="text-cyan-400">🩺</span> 蜂窝网络 5 步端到端健康自检
+            </h3>
+            <span id="net-health-overall" class="px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-slate-800 text-slate-300 border border-slate-700 font-mono">
+              等待诊断...
+            </span>
+          </div>
+          <div class="flex flex-wrap items-center gap-2">
+            <button onclick="loadCellularHealth(true)" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-xs font-medium transition">
+              🔄 重新体检
+            </button>
+            <button onclick="fastRedialCellular()" id="btn-fast-redial" class="px-3 py-1.5 rounded-xl bg-indigo-500/20 hover:bg-indigo-500/30 text-indigo-300 border border-indigo-500/40 text-xs font-semibold transition" title="跳过 15s 冷启动等待，秒级重启数据拨号刷新公网 IPv4 / IPv6">
+              ⚡ 秒换公网 IP (快速重拨)
+            </button>
+            <button onclick="toggleAirplaneMode()" id="btn-airplane-mode" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-slate-700 text-xs font-medium transition" title="一键关闭或恢复全部基带射频">
+              ✈️ 飞行模式: 关
+            </button>
+          </div>
+        </div>
+        <div id="net-health-steps" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-5 gap-2.5 text-xs">
+          <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800 text-slate-400">1. SIM 触点与鉴权 · 检测中...</div>
+          <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800 text-slate-400">2. 运营商驻网 · 检测中...</div>
+          <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800 text-slate-400">3. 数据承载与双栈 · 检测中...</div>
+          <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800 text-slate-400">4. IMS 短信/语音域 · 检测中...</div>
+          <div class="p-3 rounded-xl bg-slate-900/70 border border-slate-800 text-slate-400">5. 射频信号质量 · 检测中...</div>
+        </div>
+      </div>
+
+      <!-- 第二排：双卡双槽热切、改装触点无损检测与闪切接码中心 -->
+      <div id="sim-dual-center" class="glass-card rounded-2xl p-5 space-y-4">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="font-semibold text-white text-base flex items-center gap-2">
+                <span class="text-emerald-400">💳</span> 双卡双槽热切与改装触点检测中心
+              </h3>
+              <span id="sim-hot-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-slate-800 text-slate-400 border border-slate-700">
+                检测双路通道中...
+              </span>
+            </div>
+            <p class="text-xs text-slate-400 mt-1">
+              支持改装 SIM 2 小卡槽后<strong class="text-cyan-300">不断网无损检测 8 触点与 9eSIM/ESTK eUICC 芯片</strong>、一键切换至卡 2 提供蜂窝流量（超时不通自动回退卡 1 防失联），以及每张 ICCID 独立流量账本。
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 shrink-0">
+            <button id="btn-enable-sim-hot" onclick="enableDualSimHot()" class="hidden px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 text-xs font-semibold transition">
+              🔧 一键激活双卡热切通道
+            </button>
+            <button onclick="loadSimOverview(true)" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-xs font-medium transition">
+              刷新双卡状态
+            </button>
+          </div>
+        </div>
+
+        <!-- 切卡 / 闪切接码实时进度横幅 -->
+        <div id="sim-switch-banner" class="hidden p-3.5 rounded-xl bg-cyan-950/50 border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs">
+          <div class="flex items-center gap-2.5">
+            <span id="sim-switch-spinner" class="w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0"></span>
+            <div>
+              <div id="sim-switch-title" class="font-bold text-cyan-200">正在执行双卡热切换...</div>
+              <div id="sim-switch-desc" class="text-[11px] text-slate-300 mt-0.5">请保持页面开启，若通过 Tailscale 远端访问可能会有 8~20 秒短暂重连。</div>
+            </div>
+          </div>
+          <div class="flex items-center gap-2 shrink-0">
+            <span id="sim-flash-countdown" class="hidden px-2.5 py-1 rounded-lg bg-slate-900 font-mono font-bold text-amber-300 border border-amber-500/30">120s</span>
+            <button id="btn-cancel-flash" onclick="cancelFlashSwitch()" class="hidden px-3 py-1.5 rounded-lg bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-semibold transition">
+              立即切回主卡
+            </button>
+          </div>
+        </div>
+
+        <!-- SIM 1 / SIM 2 双卡并列详情卡片 -->
+        <div id="sim-slots-grid" class="grid grid-cols-1 lg:grid-cols-2 gap-4">
+          <div class="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 text-xs text-slate-400 text-center py-8">
+            正在加载 SIM 1 (sipa_eth0) 与 SIM 2 (sipa_eth8) 卡槽信息...
+          </div>
+          <div class="p-4 rounded-2xl bg-slate-900/70 border border-slate-800 text-xs text-slate-400 text-center py-8">
+            正在读取独立流量账本与触点缓存...
+          </div>
+        </div>
+      </div>
+
       <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-stretch">
-        <!-- 左侧栏 (5列)：SIM 卡与移动蜂窝数据 (全高对齐) -->
+        <!-- 左侧栏 (5列)：当前主卡蜂窝数据与射频看板 -->
         <div class="lg:col-span-5 glass-card rounded-2xl p-5 flex flex-col justify-between space-y-4">
           <div class="space-y-4">
             <div class="flex items-center justify-between pb-3 border-b border-slate-800">
               <div>
-                <h3 class="font-semibold text-white">SIM 卡与移动蜂窝数据</h3>
-                <p class="text-xs text-slate-400 mt-0.5">查看当前 5G/4G 拨号连接与双栈分配地址</p>
+                <h3 class="font-semibold text-white">当前上网主卡射频与地址</h3>
+                <p class="text-xs text-slate-400 mt-0.5">实时监控活动卡槽 5G/4G 签约速率与双栈地址</p>
               </div>
               <div class="flex items-center gap-2">
-                <button onclick="quickAction('reconnect-data')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 text-xs transition" title="软重连蜂窝数据">重拨</button>
+                <button onclick="fastRedialCellular()" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 border border-slate-700 text-xs transition" title="秒级重拨刷新公网 IP">快速重拨</button>
                 <button onclick="toggleMobileData()" id="btn-toggle-data" class="px-3 py-1 rounded-lg bg-emerald-500 text-black font-semibold text-xs transition">数据已开启</button>
               </div>
             </div>
@@ -615,7 +701,7 @@
           </div>
         </div>
 
-        <!-- 右侧栏 (7列)：频段锁定 + APN 接入点配置 上下紧凑堆叠 -->
+        <!-- 右侧栏 (7列)：频段锁定 + 分卡槽独立 APN 与漫游配置 -->
         <div class="lg:col-span-7 flex flex-col justify-between gap-5">
           <!-- 5G / 4G 频段锁定 (Band Lock) -->
           <div class="glass-card rounded-2xl p-5 space-y-3.5 flex-1 flex flex-col justify-between">
@@ -730,19 +816,25 @@
             <button onclick="saveBandLock()" class="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs rounded-xl transition mt-2">保存并应用频段锁定配置</button>
           </div>
 
-          <!-- APN 接入点配置卡片 (置于右侧栏下方，与左侧完美齐平) -->
+          <!-- 分卡槽独立 APN 接入点与国际漫游配置 -->
           <div class="glass-card rounded-2xl p-5 space-y-3.5">
-            <div class="flex items-center justify-between pb-2.5 border-b border-slate-800">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
               <div>
-                <h3 class="font-semibold text-white text-sm">APN 接入点与协议栈配置</h3>
-                <p class="text-[11px] text-slate-400">自定义专用物联网/政企 APN 或切换 IPv4/IPv6 双栈</p>
+                <h3 class="font-semibold text-white text-sm">分卡槽独立 APN 接入点与漫游配置</h3>
+                <p class="text-[11px] text-slate-400">可提前为 SIM 2 (海外卡 / 9eSIM 流量包) 预设专属 APN 与漫游开关，切卡前无需断网</p>
               </div>
-              <button onclick="saveApnConfig()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition shrink-0">保存并应用 APN</button>
+              <div class="flex items-center gap-2">
+                <select id="apn-target-slot" onchange="loadSlotApnForm(this.value)" class="bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 text-cyan-300 font-mono text-xs focus:outline-none focus:border-cyan-500">
+                  <option value="1">目标: SIM 1 (外置卡槽)</option>
+                  <option value="2">目标: SIM 2 (内置/改装槽)</option>
+                </select>
+                <button onclick="saveApnConfig()" class="px-4 py-1.5 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition shrink-0">保存 APN</button>
+              </div>
             </div>
             <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
               <div>
                 <label class="text-slate-400">APN 名称 (留空默认)</label>
-                <input type="text" id="apn-name" placeholder="如 cmnet / 3gnet" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+                <input type="text" id="apn-name" placeholder="如 cmnet / 3gnet / internet" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
               </div>
               <div>
                 <label class="text-slate-400">IP 协议栈 (PDP)</label>
@@ -762,51 +854,194 @@
                 </select>
               </div>
             </div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs pt-1">
+              <div>
+                <label class="text-slate-400">鉴权用户名 (可选)</label>
+                <input type="text" id="apn-user" placeholder="无则留空" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+              </div>
+              <div>
+                <label class="text-slate-400">鉴权密码 <span id="apn-pass-hint" class="text-[10px] text-slate-500"></span></label>
+                <input type="password" id="apn-pass" placeholder="不修改请留空" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+              </div>
+              <div class="flex items-end pb-1">
+                <label class="flex items-center gap-2 cursor-pointer p-2 rounded-xl bg-slate-900/70 border border-slate-800 w-full">
+                  <input type="checkbox" id="apn-roaming" checked class="rounded border-slate-700 text-emerald-500 focus:ring-0">
+                  <span class="text-slate-200 font-medium">允许该卡数据漫游 (海外卡必开)</span>
+                </label>
+              </div>
+            </div>
           </div>
         </div>
       </div>
     </section>
 
     <!-- ========================================================================= -->
-    <!-- 3. 短信 (SMS) -->
+    <!-- 3. 短信与通信中心 (SMS, OTP PUSH, USSD & CALL KEEP-ALIVE) -->
     <!-- ========================================================================= -->
     <section id="panel-sms" class="tab-panel space-y-5 hidden">
-      <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
-        <div class="lg:col-span-2 glass-card rounded-2xl p-5 space-y-3">
-          <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-            <h3 class="font-semibold text-white flex items-center gap-2">
-              <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
-              收件箱 (Inbox)
-            </h3>
-            <button onclick="fetchSmsList()" class="text-xs text-cyan-400 hover:text-cyan-300">刷新短信</button>
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5">
+        <!-- 左侧主栏 (7列)：分卡槽短信收件箱 + USSD + 语音信令保号 -->
+        <div class="lg:col-span-7 space-y-5">
+          <div class="glass-card rounded-2xl p-5 space-y-3.5">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
+              <div class="flex items-center gap-2.5">
+                <h3 class="font-semibold text-white flex items-center gap-2">
+                  <svg class="w-4 h-4 text-cyan-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M8 10h.01M12 10h.01M16 10h.01M9 16H5a2 2 0 01-2-2V6a2 2 0 012-2h14a2 2 0 012 2v8a2 2 0 01-2 2h-5l-5 5v-5z"></path></svg>
+                  5G 短信收件箱与验证码识别
+                </h3>
+                <span id="sms-count-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 text-cyan-300 border border-slate-700">0 条</span>
+              </div>
+              <div class="flex flex-wrap items-center gap-2">
+                <select id="sms-slot-select" onchange="onSmsSlotChange()" class="bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 text-xs text-cyan-300 font-mono focus:outline-none focus:border-cyan-500">
+                  <option value="">当前主用卡槽</option>
+                  <option value="1">SIM 1 (外置卡槽)</option>
+                  <option value="2">SIM 2 (内置/改装槽)</option>
+                </select>
+                <button onclick="fetchSmsList()" class="px-2.5 py-1 rounded-xl bg-slate-800 hover:bg-slate-700 text-xs text-cyan-400 transition">刷新短信</button>
+                <button onclick="deleteAllSms()" class="px-2.5 py-1 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 border border-rose-500/25 text-xs text-rose-400 transition">清空</button>
+              </div>
+            </div>
+            <div id="sms-list-container" class="space-y-2.5 max-h-[430px] overflow-y-auto scrollbar-thin">
+              <div class="text-center py-8 text-xs text-slate-500">正在读取 SIM 卡短信...</div>
+            </div>
           </div>
-          <div id="sms-list-container" class="space-y-2.5 max-h-[500px] overflow-y-auto scrollbar-thin">
-            <div class="text-center py-8 text-xs text-slate-500">正在读取 SIM 卡短信...</div>
+
+          <!-- 左下双栏：USSD 快捷查话费 + 语音信令拨号保号 -->
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-5">
+            <!-- USSD 面板 -->
+            <div class="glass-card rounded-2xl p-5 space-y-3 text-xs">
+              <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div>
+                  <h3 class="font-semibold text-white text-sm">#️⃣ USSD 运营商快捷菜单</h3>
+                  <p class="text-[11px] text-slate-400">海外卡免流量查询余额、本机号码与套餐</p>
+                </div>
+                <button onclick="cancelUssdSession()" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 text-[11px] transition">结束会话</button>
+              </div>
+              <div class="flex flex-wrap gap-1.5 font-mono text-[11px]">
+                <button onclick="quickUssd('*101#')" class="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-cyan-300">*101#</button>
+                <button onclick="quickUssd('*102#')" class="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-cyan-300">*102#</button>
+                <button onclick="quickUssd('*#100#')" class="px-2 py-1 rounded-lg bg-slate-900 hover:bg-slate-800 border border-slate-800 text-cyan-300">*#100#</button>
+              </div>
+              <div class="flex gap-2">
+                <input type="text" id="ussd-code-input" placeholder="输入 *101# 或菜单回复数字 1" class="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono focus:outline-none focus:border-cyan-500">
+                <button onclick="sendUssdCode()" class="px-3.5 py-1.5 bg-cyan-600 hover:bg-cyan-500 text-black font-bold rounded-xl transition">发送</button>
+              </div>
+              <div id="ussd-output-box" class="min-h-[84px] max-h-36 overflow-y-auto scrollbar-thin bg-black/80 border border-slate-800/80 rounded-xl p-2.5 font-mono text-[11px] text-emerald-300 whitespace-pre-wrap">// 等待发送 USSD 指令（跟随上方所选卡槽）</div>
+            </div>
+
+            <!-- 信令语音呼叫保号与来电状态 -->
+            <div class="glass-card rounded-2xl p-5 space-y-3 text-xs">
+              <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+                <div>
+                  <h3 class="font-semibold text-white text-sm">📞 信令语音拨号保号与来电</h3>
+                  <p class="text-[11px] text-slate-400">发起 ATD 真实信令呼叫激活海外卡保号周期</p>
+                </div>
+                <button onclick="loadCallStatus()" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-400 text-[11px] transition">刷新状态</button>
+              </div>
+              <div class="flex gap-2">
+                <input type="text" id="call-dial-number" placeholder="如 10086 / +1800..." class="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono focus:outline-none focus:border-emerald-500">
+                <button onclick="dialVoiceCall()" class="px-3 py-1.5 bg-emerald-600 hover:bg-emerald-500 text-black font-bold rounded-xl transition">呼叫</button>
+                <button onclick="hangupVoiceCall()" class="px-3 py-1.5 bg-rose-500/20 hover:bg-rose-500/30 text-rose-300 border border-rose-500/40 font-semibold rounded-xl transition">挂断</button>
+              </div>
+              <div class="flex gap-2">
+                <input type="text" id="call-dtmf-digits" placeholder="通话中发送 DTMF 按键 (如 1#)" class="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1 text-white font-mono">
+                <button onclick="sendCallDtmf()" class="px-3 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 rounded-xl border border-slate-700 transition">按键</button>
+              </div>
+              <div id="call-status-box" class="min-h-[60px] max-h-28 overflow-y-auto scrollbar-thin bg-black/80 border border-slate-800/80 rounded-xl p-2.5 font-mono text-[11px] text-slate-300 space-y-1">
+                <div class="text-slate-500">当前无活动通话</div>
+              </div>
+            </div>
           </div>
         </div>
 
-        <div class="space-y-5">
+        <!-- 右侧副栏 (5列)：发送短信 + Bark/Telegram/Webhook 推送与防打扰 -->
+        <div class="lg:col-span-5 space-y-5">
           <div class="glass-card rounded-2xl p-5 space-y-3">
-            <h3 class="font-semibold text-white pb-2 border-b border-slate-800 text-sm">发送短信</h3>
+            <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+              <h3 class="font-semibold text-white text-sm">发送短信</h3>
+              <span id="sms-send-slot-hint" class="text-[11px] font-mono text-cyan-400">使用: 当前主卡</span>
+            </div>
             <div>
               <label class="text-xs text-slate-400">收件人号码</label>
-              <input type="text" id="sms-to" placeholder="如 10086" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white focus:outline-none focus:border-cyan-500">
+              <input type="text" id="sms-to" placeholder="如 10086 或 +86138..." class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-xs text-white font-mono focus:outline-none focus:border-cyan-500">
             </div>
             <div>
               <label class="text-xs text-slate-400">短信内容</label>
-              <textarea id="sms-content" rows="3" placeholder="输入短信正文..." class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl p-2 text-xs text-white focus:outline-none focus:border-cyan-500"></textarea>
+              <textarea id="sms-content" rows="3" placeholder="输入短信正文 (如 CXLL 查流量)..." class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl p-2 text-xs text-white focus:outline-none focus:border-cyan-500"></textarea>
             </div>
-            <button onclick="sendSms()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition">发送</button>
+            <button onclick="sendSms()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition">立即发送短信</button>
           </div>
 
-          <div class="glass-card rounded-2xl p-5 space-y-2 text-xs">
-            <h3 class="font-semibold text-white pb-2 border-b border-slate-800 text-sm">短信自动转发</h3>
-            <p class="text-slate-400">支持将 SIM 卡收到的验证码即时推送到 Webhook 或 Telegram Bot：</p>
-            <div class="pt-2">
-              <label class="text-slate-400">Webhook URL</label>
-              <input type="text" id="sms-fwd-url" placeholder="https://api.telegram.org/bot.../sendMessage" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-xs text-white">
+          <div class="glass-card rounded-2xl p-5 space-y-3 text-xs">
+            <div class="flex items-center justify-between pb-2 border-b border-slate-800">
+              <div>
+                <h3 class="font-semibold text-white text-sm">多通道验证码推送与来电防打扰</h3>
+                <p class="text-[11px] text-slate-400 mt-0.5">支持 Bark (iOS 自动复制验证码)、Telegram 与自定义 Webhook</p>
+              </div>
+              <label class="flex items-center gap-1.5 cursor-pointer">
+                <input type="checkbox" id="comm-push-enabled" class="rounded border-slate-700 text-emerald-500">
+                <span class="text-emerald-400 font-bold">启用推送</span>
+              </label>
             </div>
-            <button onclick="saveSmsForward()" class="w-full mt-2 py-1.5 bg-slate-800 hover:bg-slate-700 text-cyan-400 font-medium rounded-xl transition">保存转发配置</button>
+
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2 pt-0.5">
+              <label class="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/70 border border-slate-800 cursor-pointer">
+                <input type="checkbox" id="comm-push-sms" checked class="rounded border-slate-700 text-cyan-500">
+                <span class="text-slate-200">新短信/验证码</span>
+              </label>
+              <label class="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/70 border border-slate-800 cursor-pointer">
+                <input type="checkbox" id="comm-push-calls" checked class="rounded border-slate-700 text-cyan-500">
+                <span class="text-slate-200">来电号码提醒</span>
+              </label>
+              <label class="flex items-center gap-1.5 p-2 rounded-xl bg-slate-900/70 border border-slate-800 cursor-pointer" title="收到语音来电时自动下发 AT+CHUP 拒接并推送来电号码">
+                <input type="checkbox" id="comm-auto-hangup" class="rounded border-slate-700 text-amber-500">
+                <span class="text-amber-300">来电自动拒接</span>
+              </label>
+            </div>
+
+            <div class="space-y-2.5 pt-1">
+              <div>
+                <div class="flex justify-between text-[11px]">
+                  <label class="text-slate-400">Bark 推送地址 (iOS 推荐)</label>
+                  <span id="comm-bark-status" class="text-slate-500 font-mono">未配置</span>
+                </div>
+                <input type="text" id="comm-bark-url" placeholder="https://api.day.app/您的BarkKey" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white font-mono">
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                <div>
+                  <label class="text-slate-400 text-[11px]">Telegram Bot Token</label>
+                  <input type="password" id="comm-tg-token" placeholder="123456:ABC-DEF..." class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white font-mono">
+                </div>
+                <div>
+                  <label class="text-slate-400 text-[11px]">Telegram Chat ID</label>
+                  <input type="text" id="comm-tg-chat" placeholder="如 123456789 或 -100..." class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white font-mono">
+                </div>
+              </div>
+
+              <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+                <div class="sm:col-span-2">
+                  <label class="text-slate-400 text-[11px]">自定义 JSON Webhook URL</label>
+                  <input type="text" id="comm-wh-url" placeholder="https://example.com/webhook" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white font-mono">
+                </div>
+                <div>
+                  <label class="text-slate-400 text-[11px]">Secret 签名头</label>
+                  <input type="password" id="comm-wh-secret" placeholder="可选" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-2.5 py-1.5 text-white font-mono">
+                </div>
+              </div>
+            </div>
+
+            <div class="flex gap-2 pt-1">
+              <button onclick="saveCommPushConfig()" class="flex-1 py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold rounded-xl transition">保存推送与防打扰设置</button>
+              <button onclick="testCommPush()" class="px-3.5 py-2 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 font-medium rounded-xl transition">测试推送</button>
+            </div>
+
+            <div class="pt-2 border-t border-slate-800/80 space-y-1.5">
+              <div class="text-[11px] text-slate-400 font-medium">最近通信与推送事件记录</div>
+              <div id="comm-events-box" class="max-h-32 overflow-y-auto scrollbar-thin space-y-1 text-[11px] font-mono text-slate-400">
+                <div class="text-slate-500">暂无推送或来电事件</div>
+              </div>
+            </div>
           </div>
         </div>
       </div>
@@ -817,63 +1052,87 @@
     <!-- ========================================================================= -->
     <section id="panel-at" class="tab-panel space-y-4 hidden font-mono">
       <div class="glass-card rounded-2xl p-5 space-y-3">
-        <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+        <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
           <div class="flex items-center gap-2">
             <span class="w-2.5 h-2.5 rounded-full bg-emerald-400 animate-pulse"></span>
-            <span class="font-semibold text-white text-sm font-sans">调制解调器 AT 指令交互 (/dev/ttyUSB2)</span>
+            <span class="font-semibold text-white text-sm font-sans">展锐 T760 双路 AT Broker 交互终端 (/run/mu300-at · /run/mu300-at4)</span>
           </div>
-          <button onclick="clearAtTerminal()" class="text-xs text-slate-400 hover:text-white">清屏</button>
+          <div class="flex items-center gap-2 font-sans">
+            <select id="at-slot-select" class="bg-slate-900 border border-slate-700 rounded-xl px-2.5 py-1 text-xs text-cyan-300 font-mono">
+              <option value="">当前主卡通道</option>
+              <option value="1">SIM 1 通道 (stty_nr1)</option>
+              <option value="2">SIM 2 通道 (stty_nr4)</option>
+            </select>
+            <button onclick="clearAtTerminal()" class="text-xs text-slate-400 hover:text-white px-2 py-1">清屏</button>
+          </div>
         </div>
 
         <div class="flex flex-wrap gap-2 text-xs">
-          <button onclick="execAtCmd('AT+CSQ')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-cyan-400">AT+CSQ (信号质量)</button>
-          <button onclick="execAtCmd('AT+COPS?')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-cyan-400">AT+COPS? (运营商)</button>
           <button onclick="execAtCmd('AT+CPIN?')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-cyan-400">AT+CPIN? (SIM就绪)</button>
-          <button onclick="execAtCmd('AT+CBC')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-cyan-400">AT+CBC (电池电量)</button>
-          <button onclick="execAtCmd('AT+CGREG?')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-cyan-400">AT+CGREG? (数据注册)</button>
+          <button onclick="execAtCmd('AT+CCID')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-cyan-400">AT+CCID (读卡号)</button>
+          <button onclick="execAtCmd('AT+SFUN?')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-cyan-400">AT+SFUN? (卡槽供电态)</button>
+          <button onclick="execAtCmd('AT+COPS?')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-cyan-400">AT+COPS? (运营商)</button>
+          <button onclick="execAtCmd('AT+C5GREG?')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-cyan-400">AT+C5GREG? (5G驻网)</button>
+          <button onclick="execAtCmd('AT+CAVIMS?')" class="px-2.5 py-1 bg-slate-900 hover:bg-slate-800 border border-slate-800 rounded-lg text-cyan-400">AT+CAVIMS? (IMS状态)</button>
         </div>
 
         <div id="at-console-out" class="w-full h-72 bg-black/90 border border-slate-800/80 rounded-xl p-3 text-xs text-emerald-400 overflow-y-auto scrollbar-thin space-y-1">
-          <div class="text-slate-500">// U30 Air AT Terminal Console Initialized. Ready for commands.</div>
+          <div class="text-slate-500">// U30 Air Dual-Broker AT Terminal Ready. 可在右上角切换 SIM 1 / SIM 2 独立通道调试。</div>
         </div>
 
         <div class="flex gap-2 pt-1 font-sans">
-          <input type="text" id="at-cmd-input" placeholder="输入 AT 命令 (例如: AT+CSQ)..." class="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-emerald-300 font-mono focus:outline-none focus:border-emerald-500">
+          <input type="text" id="at-cmd-input" placeholder="输入 AT 命令 (例如: AT+CPIN?)..." class="flex-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-xs text-emerald-300 font-mono focus:outline-none focus:border-emerald-500">
           <button onclick="submitAtCmd()" class="px-5 py-2 bg-emerald-600 hover:bg-emerald-500 text-black font-bold text-xs rounded-xl transition">执行</button>
         </div>
       </div>
     </section>
 
     <!-- ========================================================================= -->
-    <!-- 5. 流量统计 (TRAFFIC) -->
+    <!-- 5. 流量统计 (TRAFFIC - PER ICCID LEDGER) -->
     <!-- ========================================================================= -->
     <section id="panel-traffic" class="tab-panel space-y-5 hidden">
       <div class="grid grid-cols-1 lg:grid-cols-3 gap-5">
         <div class="glass-card rounded-2xl p-5 space-y-4">
-          <h3 class="font-semibold text-white pb-3 border-b border-slate-800">计费周期配额管理</h3>
+          <div class="pb-3 border-b border-slate-800 space-y-1">
+            <h3 class="font-semibold text-white">独立 SIM 卡计费周期配额管理</h3>
+            <div id="traffic-active-sim-badge" class="text-[11px] font-mono text-cyan-300">当前账本绑定: 读取中...</div>
+          </div>
           <div class="space-y-3 text-xs">
             <div>
               <label class="text-slate-400">每月重置结算日</label>
-              <input type="number" id="traffic-reset-day" value="1" min="1" max="31" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+              <input type="number" id="traffic-reset-day" value="1" min="1" max="31" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
             </div>
-            <div>
-              <label class="text-slate-400">月度流量限额 (GB, 0 为不限制)</label>
-              <input type="number" id="traffic-limit-gb" value="100" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+            <div class="grid grid-cols-2 gap-2.5">
+              <div>
+                <label class="text-slate-400">月度限额 (GB, 0 不限)</label>
+                <input type="number" id="traffic-limit-gb" value="100" step="0.5" min="0" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+              </div>
+              <div>
+                <label class="text-slate-400">单日限额 (GB, 0 不限)</label>
+                <input type="number" id="traffic-daily-gb" value="0" step="0.5" min="0" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+              </div>
             </div>
             <div>
               <label class="text-slate-400">流量预警提醒阈值 (%, 默认 80%)</label>
               <input type="number" id="traffic-warn-pct" value="80" min="50" max="99" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
             </div>
-            <label class="flex items-center gap-2 pt-2 cursor-pointer">
-              <input type="checkbox" id="traffic-cut-toggle" checked class="rounded border-slate-700 text-rose-500">
-              <span class="text-slate-300">超出配额后自动断开蜂窝数据</span>
-            </label>
-            <button onclick="saveTrafficQuota()" class="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs rounded-xl transition">保存配额设置</button>
+            <div>
+              <label class="text-slate-400">超出流量限额后执行动作</label>
+              <select id="traffic-over-action" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+                <option value="none">仅仪表盘高亮预警 (不断网)</option>
+                <option value="cut_data">超额自动断开蜂窝移动数据</option>
+                <option value="switch_sim">⚡ 超额自动热切换至另一张备用 SIM 卡</option>
+              </select>
+            </div>
+            <button onclick="saveTrafficQuota()" class="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs rounded-xl transition">保存当前 SIM 卡配额策略</button>
           </div>
         </div>
 
         <div class="lg:col-span-2 glass-card rounded-2xl p-5 space-y-4">
-          <h3 class="font-semibold text-white pb-3 border-b border-slate-800">历史每日用量走势</h3>
+          <div class="flex items-center justify-between pb-3 border-b border-slate-800">
+            <h3 class="font-semibold text-white">当前上网 SIM 卡历史每日用量走势</h3>
+            <span class="text-[11px] text-slate-400">换卡或热切双卡时自动切换对应 ICCID 专属账本</span>
+          </div>
           <div class="overflow-x-auto">
             <table class="w-full text-left text-xs">
               <thead class="text-slate-400 border-b border-slate-800">
@@ -1613,6 +1872,104 @@
 
   </main>
 
+  <!-- SIM 卡片数字档案与独立流量策略编辑弹窗 -->
+  <div id="sim-profile-modal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="glass-card rounded-2xl border border-slate-700 w-full max-w-lg p-5 space-y-4 text-xs shadow-2xl">
+      <div class="flex items-center justify-between pb-2.5 border-b border-slate-800">
+        <div>
+          <h3 class="text-sm font-bold text-white" id="sim-prof-modal-title">编辑 SIM 卡片档案与独立限额</h3>
+          <p class="text-[11px] text-cyan-400 font-mono mt-0.5" id="sim-prof-modal-iccid">ICCID: --</p>
+        </div>
+        <button onclick="closeSimProfileModal()" class="text-slate-400 hover:text-white text-base px-2">✕</button>
+      </div>
+      <input type="hidden" id="sim-prof-slot" value="1">
+      <input type="hidden" id="sim-prof-raw-iccid" value="">
+      <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+        <div>
+          <label class="text-slate-400">卡片备注昵称</label>
+          <input type="text" id="sim-prof-nickname" placeholder="如: 主力移动200G / 9eSIM保号卡" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+        </div>
+        <div>
+          <label class="text-slate-400">本机号码 (备忘)</label>
+          <input type="text" id="sim-prof-phone" placeholder="如: 138xxxx / +447..." class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+        </div>
+        <div>
+          <label class="text-slate-400">运营商显示名 (可选覆盖)</label>
+          <input type="text" id="sim-prof-carrier" placeholder="留空自动识别" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+        </div>
+        <div>
+          <label class="text-slate-400">每月账单结算日 (1~31)</label>
+          <input type="number" id="sim-prof-reset-day" min="1" max="31" value="1" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+        </div>
+        <div>
+          <label class="text-slate-400">月度流量上限 (GB, 0 不限)</label>
+          <input type="number" id="sim-prof-cap-gb" min="0" step="0.5" value="0" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+        </div>
+        <div>
+          <label class="text-slate-400">单日流量上限 (GB, 0 不限)</label>
+          <input type="number" id="sim-prof-daily-gb" min="0" step="0.5" value="0" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+        </div>
+        <div>
+          <label class="text-slate-400">预警阈值 (%)</label>
+          <input type="number" id="sim-prof-warn-pct" min="50" max="99" value="85" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+        </div>
+        <div>
+          <label class="text-slate-400">流量超额自动保护策略</label>
+          <select id="sim-prof-over-action" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+            <option value="none">仅高亮预警 (不断网)</option>
+            <option value="cut_data">超额自动断开蜂窝数据</option>
+            <option value="switch_sim">⚡ 超额自动热切换至备用卡</option>
+          </select>
+        </div>
+      </div>
+      <div>
+        <label class="text-slate-400">套餐与保号备忘说明</label>
+        <input type="text" id="sim-prof-notes" placeholder="如: 每 180 天发短信保号 / 已写 Giffgaff + ClubSIM" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeSimProfileModal()" class="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300">取消</button>
+        <button onclick="submitSimProfile()" class="px-5 py-1.5 rounded-xl bg-cyan-600 hover:bg-cyan-500 text-black font-bold">保存卡片档案</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 闪切接码防失联模式弹窗 -->
+  <div id="sim-flash-modal" class="fixed inset-0 z-50 hidden bg-black/75 backdrop-blur-sm flex items-center justify-center p-4">
+    <div class="glass-card rounded-2xl border border-amber-500/40 w-full max-w-md p-5 space-y-4 text-xs shadow-2xl">
+      <div class="flex items-center justify-between pb-2.5 border-b border-slate-800">
+        <h3 class="text-sm font-bold text-amber-300 flex items-center gap-1.5">⏱️ 启动闪切接码防失联模式</h3>
+        <button onclick="closeFlashSwitchModal()" class="text-slate-400 hover:text-white text-base px-2">✕</button>
+      </div>
+      <input type="hidden" id="sim-flash-target-slot" value="2">
+      <div class="p-3 rounded-xl bg-amber-950/30 border border-amber-500/30 text-slate-300 leading-relaxed">
+        由于单基带同一时刻仅单卡驻网，启动后设备将<strong class="text-amber-300">临时切往目标副卡驻网监听短信验证码</strong>，并在收到新短信或倒计时结束后<strong class="text-emerald-300">100% 自动强制切回当前主流量卡</strong>恢复网络与 Tailscale，同时将捕获到的验证码推送至 Bark / Telegram / Webhook。
+      </div>
+      <div class="space-y-2.5">
+        <div>
+          <label class="text-slate-400">最长驻网等待时间</label>
+          <select id="sim-flash-duration" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+            <option value="60">60 秒 (快速接码)</option>
+            <option value="120" selected>120 秒 (推荐标准接码)</option>
+            <option value="180">180 秒 (海外漫游慢速驻网)</option>
+            <option value="240">240 秒 (首次搜网激活)</option>
+          </select>
+        </div>
+        <label class="flex items-center gap-2 cursor-pointer pt-1">
+          <input type="checkbox" id="sim-flash-early-return" checked class="rounded border-slate-700 text-emerald-500">
+          <span class="text-slate-200">一旦捕获到新短信立即提前切回主卡 (更快恢复网络)</span>
+        </label>
+        <label class="flex items-center gap-2 cursor-pointer">
+          <input type="checkbox" id="sim-flash-radio-only" checked class="rounded border-slate-700 text-cyan-500">
+          <span class="text-slate-200">纯信令驻网接码 (不发起副卡数据拨号，防止海外保号卡产生漫游流量费)</span>
+        </label>
+      </div>
+      <div class="flex justify-end gap-2 pt-2 border-t border-slate-800">
+        <button onclick="closeFlashSwitchModal()" class="px-4 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300">取消</button>
+        <button onclick="submitFlashSwitch()" class="px-5 py-1.5 rounded-xl bg-amber-500 hover:bg-amber-400 text-black font-bold">开始闪切接码</button>
+      </div>
+    </div>
+  </div>
+
   <!-- 底部固定浮动 Toast 消息通知 -->
   <div id="toast" class="fixed bottom-5 right-5 z-50 bg-slate-900 border border-slate-700 text-white px-4 py-3 rounded-2xl shadow-2xl text-xs flex items-center gap-2 transform translate-y-24 opacity-0 transition-all duration-300 pointer-events-none">
     <span id="toast-icon">✨</span>
@@ -1795,7 +2152,7 @@
       }
 
       if (tabId === 'network') loadNetworkTab();
-      if (tabId === 'sms') { fetchSmsList(); loadSmsForward(); }
+      if (tabId === 'sms') loadSmsTab();
       if (tabId === 'at') loadAtHistory();
       if (tabId === 'traffic') loadTrafficStats();
       if (tabId === 'wifi') loadWifiTab();
@@ -2780,27 +3137,58 @@
       }
     }
 
-    // 短信
+    // =========================================================================
+    // 短信、OTP 验证码提取、Bark/TG/Webhook 推送、USSD 与信令语音保号
+    // =========================================================================
+    function getSelectedSmsSlot() {
+      const el = document.getElementById('sms-slot-select');
+      if (!el || !el.value) return null;
+      const n = parseInt(el.value, 10);
+      return (n === 1 || n === 2) ? n : null;
+    }
+
+    function onSmsSlotChange() {
+      const sl = getSelectedSmsSlot();
+      const hint = document.getElementById('sms-send-slot-hint');
+      if (hint) hint.innerText = sl ? `使用: SIM ${sl}` : '使用: 当前主卡';
+      fetchSmsList();
+      loadCallStatus();
+    }
+
+    async function loadSmsTab() {
+      fetchSmsList();
+      loadCommPushConfig();
+      loadCallStatus();
+    }
+
     async function fetchSmsList() {
       const container = document.getElementById('sms-list-container');
-      container.innerHTML = '<div class="text-center py-6 text-xs text-slate-500">正在读取短信...</div>';
-      const res = await apiCall('sms.list');
-      const messages = (res && res.data && res.data.messages) || (res && res.messages) || [];
+      if (container) container.innerHTML = '<div class="text-center py-6 text-xs text-slate-500">正在读取短信...</div>';
+      const sl = getSelectedSmsSlot();
+      const req = sl ? { slot: sl } : {};
+      const res = await apiCall('sms.list', req);
+      const messages = (res && res.messages) || (res && res.data && res.data.messages) || [];
+      const badge = document.getElementById('sms-count-badge');
+      if (badge) badge.innerText = `${messages.length} 条 · SIM ${res && res.slot ? res.slot : (sl || '主卡')}`;
+      if (!container) return;
+
       if (messages.length) {
         container.innerHTML = messages.map(m => {
           const textBody = m.text || m.body || '';
           const sender = m.sender || m.number || m.from || '未知号码';
-          const dateStr = m.date || m.timestamp || '';
+          const dateStr = m.time || m.date || m.timestamp || '';
           const msgId = m.id !== undefined ? m.id : m.index;
-          const codeMatch = textBody ? textBody.match(/\b\d{4,6}\b/) : null;
-          const codeHtml = codeMatch ? `<button onclick="copyText('${codeMatch[0]}')" class="px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-500/30 text-[10px] font-mono hover:bg-cyan-500/30 ml-2">复制验证码: ${codeMatch[0]}</button>` : '';
+          const otp = m.otp_code || ((textBody.match(/\b\d{4,8}\b/) || [])[0] || '');
+          const codeHtml = otp
+            ? `<button onclick="copyText('${escapeJs(otp)}')" class="px-2 py-0.5 rounded-lg bg-cyan-500/20 text-cyan-200 border border-cyan-500/40 text-[10px] font-mono font-bold hover:bg-cyan-500/35 ml-2 transition">🔑 复制验证码: ${escapeHtml(otp)}</button>`
+            : '';
           return `
-            <div class="p-3 bg-slate-900/70 border border-slate-800 rounded-xl space-y-1.5 text-xs">
-              <div class="flex justify-between items-center text-slate-400">
-                <span class="font-bold text-white font-mono">${escapeHtml(sender)} ${codeHtml}</span>
-                <span class="text-[11px] font-mono">${escapeHtml(dateStr)}</span>
+            <div class="p-3 bg-slate-900/75 border border-slate-800 hover:border-slate-700 rounded-xl space-y-1.5 text-xs transition">
+              <div class="flex flex-wrap justify-between items-center gap-1 text-slate-400">
+                <span class="font-bold text-white font-mono flex items-center flex-wrap">${escapeHtml(sender)}${codeHtml}</span>
+                <span class="text-[11px] font-mono text-slate-400">${escapeHtml(dateStr)}</span>
               </div>
-              <div class="text-slate-200 leading-relaxed">${escapeHtml(textBody)}</div>
+              <div class="text-slate-200 leading-relaxed break-words">${escapeHtml(textBody)}</div>
               <div class="flex justify-end pt-1">
                 <button onclick="deleteSms('${msgId}')" class="text-[10px] text-rose-400 hover:text-rose-300">删除短信</button>
               </div>
@@ -2808,62 +3196,248 @@
           `;
         }).join('');
       } else {
-        container.innerHTML = '<div class="text-center py-8 text-xs text-slate-500">收件箱暂无短信</div>';
+        const errHint = (res && !res.ok && res.error) ? `（提示: ${escapeHtml(res.error)}）` : '';
+        container.innerHTML = `<div class="text-center py-8 text-xs text-slate-500">当前所选卡槽收件箱暂无短信 ${errHint}</div>`;
       }
     }
 
     function copyText(txt) {
-      navigator.clipboard.writeText(txt);
+      if (navigator.clipboard && navigator.clipboard.writeText) {
+        navigator.clipboard.writeText(txt);
+      }
       showToast(`已复制: ${txt}`);
     }
 
     async function sendSms() {
       const to = document.getElementById('sms-to').value.trim();
       const content = document.getElementById('sms-content').value.trim();
-      if (!to || !content) return showToast('请输入手机号和短信内容', false);
-      showToast('正在发送短信...');
-      const res = await apiCall('sms.send', { number: to, text: content });
+      if (!to || !content) return showToast('请输入收件人号码和短信内容', false);
+      const sl = getSelectedSmsSlot();
+      showToast(`正在通过 ${sl ? ('SIM ' + sl) : '当前主卡'} 发送短信...`);
+      const req = { number: to, text: content };
+      if (sl) req.slot = sl;
+      const res = await apiCall('sms.send', req);
       if (res && res.ok) {
         showToast('短信已发送成功');
         document.getElementById('sms-content').value = '';
       } else {
-        showToast('发送失败: ' + (res.error || '未知错误'), false);
+        showToast('发送失败: ' + ((res && res.error) || '请确认该卡已驻网或处于活动态'), false);
       }
     }
 
     async function deleteSms(id) {
       if (!confirm('确定删除此短信？')) return;
-      await apiCall('sms.delete', { id: Number(id) });
+      const sl = getSelectedSmsSlot();
+      const req = { id: String(id) };
+      if (sl) req.slot = sl;
+      await apiCall('sms.delete', req);
       showToast('短信已删除');
       fetchSmsList();
     }
 
-    async function loadSmsForward() {
-      const res = await apiCall('sms.forward');
-      if (res && res.forward) {
-        const fwd = res.forward;
-        const urlEl = document.getElementById('sms-fwd-url');
-        if (urlEl && fwd.webhook_url) urlEl.value = fwd.webhook_url;
-      }
-    }
-
-    async function saveSmsForward() {
-      const urlEl = document.getElementById('sms-fwd-url');
-      const url = urlEl ? urlEl.value.trim() : '';
-      showToast('正在保存短信转发配置...');
-      const res = await apiCall('sms.forward_set', {
-        enabled: !!url,
-        webhook: !!url,
-        webhook_url: url
-      });
+    async function deleteAllSms() {
+      const sl = getSelectedSmsSlot();
+      if (!confirm(`确定清空 ${sl ? ('SIM ' + sl) : '当前主卡'} 收件箱中的全部短信吗？`)) return;
+      const req = { id: 'all' };
+      if (sl) req.slot = sl;
+      const res = await apiCall('sms.delete', req);
       if (res && res.ok) {
-        showToast(url ? '短信 Webhook 转发已启用' : '短信自动转发已关闭');
+        showToast('已清空该卡槽短信');
+        fetchSmsList();
       } else {
-        showToast('保存转发配置失败: ' + (res.error || ''), false);
+        showToast('清空失败: ' + ((res && res.error) || ''), false);
       }
     }
 
-    // AT 终端
+    async function loadCommPushConfig() {
+      const res = await apiCall('comm.push_get');
+      if (!res || !res.ok) return;
+      const cfg = res.config || {};
+      if (document.getElementById('comm-push-enabled')) document.getElementById('comm-push-enabled').checked = !!cfg.enabled;
+      if (document.getElementById('comm-push-sms')) document.getElementById('comm-push-sms').checked = cfg.push_sms !== false;
+      if (document.getElementById('comm-push-calls')) document.getElementById('comm-push-calls').checked = cfg.push_calls !== false;
+      if (document.getElementById('comm-auto-hangup')) document.getElementById('comm-auto-hangup').checked = !!cfg.auto_hangup_calls;
+
+      const barkSt = document.getElementById('comm-bark-status');
+      if (barkSt) {
+        barkSt.innerText = cfg.bark_configured ? `已配置 (${cfg.bark_preview})` : '未配置';
+        barkSt.className = cfg.bark_configured ? 'text-emerald-400 font-mono' : 'text-slate-500 font-mono';
+      }
+      const barkIn = document.getElementById('comm-bark-url');
+      if (barkIn && !barkIn.value && cfg.bark_preview) {
+        barkIn.placeholder = `已保存: ${cfg.bark_preview} (留空保持不变)`;
+      }
+      const tgTokIn = document.getElementById('comm-tg-token');
+      if (tgTokIn && cfg.tg_configured) {
+        tgTokIn.placeholder = `已配置 (${cfg.tg_token_preview})`;
+      }
+      const tgChatIn = document.getElementById('comm-tg-chat');
+      if (tgChatIn && cfg.tg_chat_id) tgChatIn.value = cfg.tg_chat_id;
+
+      const whIn = document.getElementById('comm-wh-url');
+      if (whIn && !whIn.value && cfg.webhook_preview) {
+        whIn.placeholder = `已保存: ${cfg.webhook_preview} (留空保持不变)`;
+      }
+      const whSecIn = document.getElementById('comm-wh-secret');
+      if (whSecIn && cfg.webhook_secret_set) {
+        whSecIn.placeholder = '已设置签名密钥';
+      }
+
+      const evBox = document.getElementById('comm-events-box');
+      if (evBox) {
+        const evs = res.events || [];
+        if (!evs.length) {
+          evBox.innerHTML = '<div class="text-slate-500">暂无推送或来电事件</div>';
+        } else {
+          evBox.innerHTML = evs.slice(0, 12).map(e => `
+            <div class="p-1.5 rounded-lg bg-slate-900/70 border border-slate-800/80 flex flex-col gap-0.5">
+              <div class="flex justify-between">
+                <span class="${e.ok ? 'text-emerald-300' : 'text-rose-400'} font-semibold">${escapeHtml(e.title || '')}</span>
+                <span class="text-slate-500 text-[10px]">${escapeHtml((e.time || '').slice(5))}</span>
+              </div>
+              <div class="text-slate-400 text-[10px] break-all">${escapeHtml(e.detail || '')}</div>
+            </div>
+          `).join('');
+        }
+      }
+    }
+
+    async function saveCommPushConfig() {
+      const req = {
+        enabled: document.getElementById('comm-push-enabled').checked,
+        push_sms: document.getElementById('comm-push-sms').checked,
+        push_calls: document.getElementById('comm-push-calls').checked,
+        auto_hangup_calls: document.getElementById('comm-auto-hangup').checked,
+        tg_chat_id: (document.getElementById('comm-tg-chat').value || '').trim(),
+      };
+      const barkVal = (document.getElementById('comm-bark-url').value || '').trim();
+      if (barkVal) req.bark_url = barkVal;
+      const tgTok = (document.getElementById('comm-tg-token').value || '').trim();
+      if (tgTok) req.tg_bot_token = tgTok;
+      const whUrl = (document.getElementById('comm-wh-url').value || '').trim();
+      if (whUrl) req.webhook_url = whUrl;
+      const whSec = (document.getElementById('comm-wh-secret').value || '').trim();
+      if (whSec) req.webhook_secret = whSec;
+
+      showToast('正在保存多通道推送与防打扰规则...');
+      const res = await apiCall('comm.push_set', req);
+      if (res && res.ok) {
+        document.getElementById('comm-bark-url').value = '';
+        document.getElementById('comm-tg-token').value = '';
+        document.getElementById('comm-wh-url').value = '';
+        document.getElementById('comm-wh-secret').value = '';
+        showToast(res.msg || '推送与来电规则已保存');
+        loadCommPushConfig();
+      } else {
+        showToast('保存失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function testCommPush() {
+      showToast('正在向已配置的推送通道发送验证码测试卡片...');
+      const res = await apiCall('comm.push_test');
+      if (res && res.ok) {
+        showToast('测试推送已送达: ' + (res.summary || '成功'));
+        loadCommPushConfig();
+      } else {
+        showToast('测试推送失败: ' + ((res && (res.error || res.summary)) || ''), false);
+      }
+    }
+
+    function quickUssd(code) {
+      const el = document.getElementById('ussd-code-input');
+      if (el) el.value = code;
+      sendUssdCode();
+    }
+
+    async function sendUssdCode() {
+      const el = document.getElementById('ussd-code-input');
+      const code = el ? el.value.trim() : '';
+      if (!code) return showToast('请输入 USSD 指令（如 *101#）', false);
+      const outBox = document.getElementById('ussd-output-box');
+      const sl = getSelectedSmsSlot();
+      if (outBox) outBox.innerText = `> 正在向 ${sl ? ('SIM ' + sl) : '当前主卡'} 发送 ${code} (等待基站响应，最长 45s)...`;
+      const req = { code };
+      if (sl) req.slot = sl;
+      const res = await apiCall('ussd.send', req);
+      if (res && res.ok) {
+        if (outBox) outBox.innerText = res.text || '(运营商已受理，无文本返回)';
+        showToast('USSD 响应已返回');
+      } else {
+        if (outBox) outBox.innerText = `ERROR: ${(res && res.error) || 'USSD 请求超时或该卡未驻网'}`;
+        showToast('USSD 发送失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function cancelUssdSession() {
+      const sl = getSelectedSmsSlot();
+      const req = sl ? { slot: sl } : {};
+      await apiCall('ussd.cancel', req);
+      const outBox = document.getElementById('ussd-output-box');
+      if (outBox) outBox.innerText = '// USSD 交互会话已关闭';
+      showToast('已结束 USSD 会话');
+    }
+
+    async function loadCallStatus() {
+      const sl = getSelectedSmsSlot();
+      const res = await apiCall('call.status', sl ? { slot: sl } : {});
+      const box = document.getElementById('call-status-box');
+      if (!box || !res || !res.ok) return;
+      const calls = res.calls || [];
+      const recents = res.recent_calls || [];
+      let html = '';
+      if (calls.length) {
+        html += calls.map(c => `<div class="text-emerald-300 font-bold">🟢 [SIM ${res.slot}] ${escapeHtml(c.state_text)}: ${escapeHtml(c.number)}</div>`).join('');
+      } else {
+        html += `<div class="text-slate-400">SIM ${res.slot} 当前空闲（无活动语音呼叫）</div>`;
+      }
+      if (recents.length) {
+        html += recents.slice(0, 4).map(r => `<div class="text-slate-500 text-[10px]">${escapeHtml((r.time || '').slice(5))} · ${escapeHtml(r.title || '')} (${escapeHtml(r.detail || '')})</div>`).join('');
+      }
+      box.innerHTML = html;
+    }
+
+    async function dialVoiceCall() {
+      const num = (document.getElementById('call-dial-number').value || '').trim();
+      if (!num) return showToast('请输入要呼叫的号码（如 10086）', false);
+      const sl = getSelectedSmsSlot();
+      showToast(`正在发起信令语音呼叫: ${num}...`);
+      const req = { number: num };
+      if (sl) req.slot = sl;
+      const res = await apiCall('call.dial', req);
+      if (res && res.ok) {
+        showToast(res.msg || '呼叫已发起，可响铃数秒后点挂断完成保号');
+        setTimeout(loadCallStatus, 1200);
+      } else {
+        showToast('呼叫失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function sendCallDtmf() {
+      const digits = (document.getElementById('call-dtmf-digits').value || '').trim();
+      if (!digits) return;
+      const sl = getSelectedSmsSlot();
+      const req = { digits };
+      if (sl) req.slot = sl;
+      const res = await apiCall('call.dtmf', req);
+      if (res && res.ok) {
+        showToast(`已发送按键: ${res.digits}`);
+        document.getElementById('call-dtmf-digits').value = '';
+      } else {
+        showToast('DTMF 发送失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function hangupVoiceCall() {
+      const sl = getSelectedSmsSlot();
+      const res = await apiCall('call.hangup', sl ? { slot: sl } : {});
+      showToast((res && res.msg) || '已发送挂断指令');
+      setTimeout(loadCallStatus, 800);
+    }
+
+    // =========================================================================
+    // AT 终端 (支持切换 SIM 1 / SIM 2 独立 Broker 通道)
+    // =========================================================================
     let atHistoryLoaded = false;
     async function loadAtHistory() {
       if (atHistoryLoaded) return;
@@ -2881,19 +3455,23 @@
       }
     }
 
-    function appendAtLog(cmd, out) {
+    function appendAtLog(cmd, out, slotTag = '') {
       const box = document.getElementById('at-console-out');
       const item = document.createElement('div');
       item.className = 'border-b border-slate-900 pb-1 mb-1';
-      item.innerHTML = `<span class="text-cyan-400">&gt; ${escapeHtml(cmd)}</span><br><span class="text-emerald-300 whitespace-pre-wrap">${escapeHtml(out)}</span>`;
+      item.innerHTML = `<span class="text-cyan-400">&gt; ${slotTag ? '[' + escapeHtml(slotTag) + '] ' : ''}${escapeHtml(cmd)}</span><br><span class="text-emerald-300 whitespace-pre-wrap">${escapeHtml(out)}</span>`;
       box.appendChild(item);
       box.scrollTop = box.scrollHeight;
     }
 
     async function execAtCmd(cmd) {
-      const res = await apiCall('at.send', { command: cmd, timeout: 5 });
+      const slotEl = document.getElementById('at-slot-select');
+      const sl = slotEl && slotEl.value ? parseInt(slotEl.value, 10) : null;
+      const req = { command: cmd, timeout: 6 };
+      if (sl === 1 || sl === 2) req.slot = sl;
+      const res = await apiCall('at.send', req);
       const outText = res.text || res.response || (res.ok ? 'OK' : ('ERROR: ' + res.error));
-      appendAtLog(cmd, outText);
+      appendAtLog(cmd, outText, sl ? `SIM ${sl}` : '主卡');
     }
 
     function submitAtCmd() {
@@ -2914,13 +3492,7 @@
         showToast('正在向设备下发 reboot 重启指令...');
         await apiCall('system.reboot');
       } else if (type === 'reconnect-data') {
-        showToast('正在重连蜂窝数据网络...');
-        await apiCall('data.power', { state: 'off' });
-        setTimeout(async () => {
-          await apiCall('data.power', { state: 'on' });
-          showToast('蜂窝数据已重新激活');
-          setTimeout(fetchOverview, 2000);
-        }, 1500);
+        await fastRedialCellular();
       } else if (type === 'restart-modem') {
         showToast('正在重启调制解调器射频...');
         await apiCall('modem.restart');
@@ -2928,9 +3500,520 @@
     }
 
     // =========================================================================
-    // 移动网络 Tab 完整实现 (修复 IP 读取与频段/APN 配置)
+    // 双卡双槽热切、改装无损触点检测、5 步健康诊断与分卡槽 APN 控制中心
     // =========================================================================
+    let simOverviewCache = null;
+    let simSwitchPollTimer = null;
+    let apnSlotInitialized = false;
+    let slotProbeOutputs = {};
+
+    async function loadCellularHealth(manual = false) {
+      if (manual) showToast('正在执行 5 步蜂窝链路端到端体检...');
+      const res = await apiCall('cellular.health');
+      if (!res || !res.ok) return;
+      const badge = document.getElementById('net-health-overall');
+      if (badge) {
+        if (res.overall === 'healthy') {
+          badge.innerText = `✅ ${res.score}/5 链路健康 (SIM ${res.slot} · ${res.iface})`;
+          badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-emerald-500/15 text-emerald-300 border border-emerald-500/30 font-mono';
+        } else if (res.overall === 'degraded') {
+          badge.innerText = `⚠️ ${res.score}/5 部分受限 (SIM ${res.slot})`;
+          badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-amber-500/15 text-amber-300 border border-amber-500/30 font-mono';
+        } else {
+          badge.innerText = `❌ ${res.score}/5 链路离线 (SIM ${res.slot})`;
+          badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-bold bg-rose-500/15 text-rose-300 border border-rose-500/30 font-mono';
+        }
+      }
+      const box = document.getElementById('net-health-steps');
+      if (box && Array.isArray(res.steps)) {
+        box.innerHTML = res.steps.map(s => {
+          const stCls = s.status === 'ok'
+            ? 'border-emerald-500/30 bg-emerald-950/20 text-emerald-300'
+            : (s.status === 'warn' ? 'border-amber-500/30 bg-amber-950/20 text-amber-300' : 'border-rose-500/35 bg-rose-950/25 text-rose-300');
+          const dot = s.status === 'ok' ? '🟢' : (s.status === 'warn' ? '🟡' : '🔴');
+          return `
+            <div class="p-3 rounded-xl border ${stCls} space-y-1">
+              <div class="font-bold text-white flex items-center justify-between text-xs">
+                <span>${escapeHtml(s.title)}</span>
+                <span>${dot}</span>
+              </div>
+              <div class="text-[11px] leading-snug opacity-95 font-mono break-all">${escapeHtml(s.summary || '')}</div>
+            </div>
+          `;
+        }).join('');
+      }
+    }
+
+    async function fastRedialCellular() {
+      const btn = document.getElementById('btn-fast-redial');
+      if (btn) { btn.disabled = true; btn.innerText = '⏳ 正在重拨换 IP...'; }
+      showToast('正在执行秒级快速重拨，刷新运营商公网 IP...');
+      try {
+        const res = await apiCall('cellular.redial');
+        if (res && res.ok) {
+          const ipDiff = (res.old_ipv4 && res.new_ipv4 && res.old_ipv4 !== res.new_ipv4)
+            ? ` (${res.old_ipv4} → ${res.new_ipv4})`
+            : (res.new_ipv4 ? ` (当前 IP: ${res.new_ipv4})` : '');
+          showToast(`快速重拨成功，耗时 ${res.elapsed_s}s${ipDiff}`);
+          loadNetworkTab();
+          fetchOverview(true);
+        } else {
+          showToast('快速重拨失败: ' + ((res && res.error) || ''), false);
+        }
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = '⚡ 秒换公网 IP (快速重拨)'; }
+      }
+    }
+
+    async function toggleAirplaneMode() {
+      const isOff = simOverviewCache && simOverviewCache.airplane_mode;
+      const nextState = isOff ? 'on' : 'off';
+      if (!isOff && !confirm('开启飞行模式将关闭双卡射频并断开蜂窝数据（仅保留 Wi-Fi 局域网管理），确认继续？')) return;
+      showToast(isOff ? '正在关闭飞行模式并恢复基带射频...' : '正在开启飞行模式...');
+      const res = await apiCall('radio.set', { slot: 'all', state: nextState });
+      if (res && res.ok) {
+        showToast(isOff ? '基带射频已恢复' : '已进入飞行模式');
+        setTimeout(() => { loadSimOverview(false); loadCellularHealth(false); fetchOverview(true); }, 1800);
+      } else {
+        showToast('切换飞行模式失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function loadSimOverview(refreshActive = false) {
+      const res = await apiCall('sim.overview', { refresh: !!refreshActive });
+      if (!res || !res.ok) return;
+      simOverviewCache = res;
+
+      const hotBadge = document.getElementById('sim-hot-badge');
+      const btnHot = document.getElementById('btn-enable-sim-hot');
+      const allBrokersUp = Array.isArray(res.slots) && res.slots.every(s => s.broker_up);
+      if (hotBadge) {
+        if (res.available && allBrokersUp) {
+          hotBadge.innerText = `⚡ 双卡在线秒切已就绪 · 当前 SIM ${res.active_slot}`;
+          hotBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+          if (btnHot) btnHot.classList.add('hidden');
+        } else {
+          hotBadge.innerText = '⚠️ 副卡 Broker 未激活 (点击右侧一键激活)';
+          hotBadge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-amber-500/15 text-amber-300 border border-amber-500/30';
+          if (btnHot) btnHot.classList.remove('hidden');
+        }
+      }
+
+      const btnAir = document.getElementById('btn-airplane-mode');
+      if (btnAir) {
+        btnAir.innerText = res.airplane_mode ? '✈️ 飞行模式: 已开启 (点此恢复)' : '✈️ 飞行模式: 关';
+        btnAir.className = res.airplane_mode
+          ? 'px-3 py-1.5 rounded-xl bg-amber-500 text-black font-bold text-xs transition'
+          : 'px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-amber-500/20 text-slate-300 hover:text-amber-300 border border-slate-700 text-xs font-medium transition';
+      }
+
+      if (!apnSlotInitialized && document.getElementById('apn-target-slot')) {
+        apnSlotInitialized = true;
+        document.getElementById('apn-target-slot').value = String(res.active_slot || 1);
+        loadSlotApnForm(res.active_slot || 1);
+      }
+
+      renderSimSwitchBanner(res.switch, res.flash);
+      renderSimSlotCards(res);
+      if ((res.switch && res.switch.running) || (res.flash && res.flash.running)) {
+        startSimSwitchPolling();
+      }
+    }
+
+    function renderSimSwitchBanner(sw, fl) {
+      const banner = document.getElementById('sim-switch-banner');
+      const titleEl = document.getElementById('sim-switch-title');
+      const descEl = document.getElementById('sim-switch-desc');
+      const cdEl = document.getElementById('sim-flash-countdown');
+      const cancelBtn = document.getElementById('btn-cancel-flash');
+      const spinEl = document.getElementById('sim-switch-spinner');
+      if (!banner) return;
+
+      if (fl && fl.running) {
+        banner.classList.remove('hidden');
+        banner.className = 'p-3.5 rounded-xl bg-amber-950/50 border border-amber-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs';
+        if (spinEl) spinEl.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-ping shrink-0';
+        if (titleEl) titleEl.innerText = `⏱️ 闪切接码运行中 (${fl.phase === 'listening' ? '正在副卡驻网监听短信' : '正在自动切回主卡'})`;
+        if (descEl) descEl.innerText = fl.msg || '';
+        if (cdEl) { cdEl.classList.remove('hidden'); cdEl.innerText = `${fl.remaining_s || 0}s`; }
+        if (cancelBtn) cancelBtn.classList.remove('hidden');
+      } else if (sw && sw.running) {
+        banner.classList.remove('hidden');
+        banner.className = 'p-3.5 rounded-xl bg-cyan-950/50 border border-cyan-500/40 flex flex-col sm:flex-row sm:items-center justify-between gap-3 text-xs';
+        if (spinEl) spinEl.className = 'w-2.5 h-2.5 rounded-full bg-cyan-400 animate-ping shrink-0';
+        if (titleEl) titleEl.innerText = `⚡ 正在热切换蜂窝主卡: SIM ${sw.from_slot} → SIM ${sw.target_slot} (已用时 ${sw.elapsed_s || 0}s)`;
+        if (descEl) descEl.innerText = sw.msg || '目标卡若超时无法建立数据连接将自动安全回滚至原卡...';
+        if (cdEl) cdEl.classList.add('hidden');
+        if (cancelBtn) cancelBtn.classList.add('hidden');
+      } else {
+        banner.classList.add('hidden');
+      }
+    }
+
+    function renderSimSlotCards(ov) {
+      const grid = document.getElementById('sim-slots-grid');
+      if (!grid || !Array.isArray(ov.slots)) return;
+
+      grid.innerHTML = ov.slots.map(s => {
+        const isAct = !!s.active;
+        const prof = s.profile || {};
+        const tr = s.traffic || {};
+        const cardBorder = isAct
+          ? 'border-emerald-500/50 bg-gradient-to-br from-slate-900/95 to-emerald-950/20 shadow-lg shadow-emerald-950/20'
+          : 'border-slate-800 bg-slate-900/75 hover:border-slate-700';
+
+        const statusBadge = isAct
+          ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500 text-black">🟢 当前上网主卡</span>'
+          : '<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-300 border border-slate-700">⚪ 待机副卡</span>';
+        const bootBadge = s.boot_default
+          ? '<span class="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">开机默认</span>'
+          : '';
+        const euiccBadge = s.is_euicc
+          ? '<span class="px-2 py-0.5 rounded text-[10px] font-bold bg-purple-500/20 text-purple-300 border border-purple-500/40">✨ eUICC (9eSIM/ESTK 就绪)</span>'
+          : '';
+        const cpinCls = s.cpin === 'READY'
+          ? 'text-emerald-300 bg-emerald-500/10 border-emerald-500/30'
+          : (s.cpin === 'UNPROBED' ? 'text-slate-400 bg-slate-800 border-slate-700' : 'text-rose-300 bg-rose-500/15 border-rose-500/30');
+        const cpinLabel = s.cpin === 'READY' ? '触点正常 · READY' : (s.cpin === 'UNPROBED' ? '待点触点检测' : `卡状态: ${s.cpin}`);
+
+        const titleName = prof.nickname || s.label;
+        const carrierStr = s.carrier || '待识别运营商';
+        const capBytes = Number(tr.cap_bytes || 0);
+        const usedBytes = Number(tr.cycle_bytes || 0);
+        const usedPct = capBytes > 0 ? Math.min(100, Number(tr.used_pct || 0)) : 0;
+        const overAct = prof.over_limit_action || 'none';
+        const overTag = overAct === 'switch_sim'
+          ? '<span class="text-[10px] text-amber-300 font-mono">⚡超额自动切副卡</span>'
+          : (overAct === 'cut_data' ? '<span class="text-[10px] text-rose-300 font-mono">🛑超额断网</span>' : '');
+
+        const probeHtml = slotProbeOutputs[s.slot] || '';
+
+        return `
+          <div class="p-4 rounded-2xl border ${cardBorder} space-y-3.5 text-xs transition flex flex-col justify-between">
+            <div class="space-y-3">
+              <div class="flex flex-wrap items-center justify-between gap-1.5">
+                <div class="flex flex-wrap items-center gap-1.5">
+                  <span class="font-mono font-black text-sm text-white">SIM ${s.slot}</span>
+                  ${statusBadge}
+                  ${bootBadge}
+                  ${euiccBadge}
+                </div>
+                <span class="px-2 py-0.5 rounded border text-[10px] font-mono ${cpinCls}">${escapeHtml(cpinLabel)}</span>
+              </div>
+
+              <div class="flex items-start justify-between gap-2">
+                <div>
+                  <div class="text-sm font-bold text-white">${escapeHtml(titleName)}</div>
+                  <div class="text-[11px] text-slate-400 mt-0.5 flex flex-wrap items-center gap-x-2 gap-y-0.5">
+                    <span class="text-cyan-300 font-medium">${escapeHtml(carrierStr)}</span>
+                    <span class="font-mono text-slate-500">接口: ${escapeHtml(s.iface)}</span>
+                    ${prof.phone ? `<span class="font-mono text-emerald-300">号码: ${escapeHtml(prof.phone)}</span>` : ''}
+                  </div>
+                  ${prof.notes ? `<div class="text-[11px] text-slate-400 mt-1">📝 ${escapeHtml(prof.notes)}</div>` : ''}
+                </div>
+                <button onclick="openSimProfileModal(${s.slot})" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-[11px] shrink-0 transition">
+                  ✏️ 档案/限额
+                </button>
+              </div>
+
+              <div class="p-2.5 rounded-xl bg-slate-950/80 border border-slate-800/80 space-y-2">
+                <div class="flex items-center justify-between text-[11px]">
+                  <span class="text-slate-400">卡片 ICCID</span>
+                  ${s.iccid
+                    ? `<button onclick="copyText('${escapeJs(s.iccid)}')" class="font-mono text-slate-200 hover:text-cyan-300 underline decoration-dotted" title="点击复制完整 20 位 ICCID">${escapeHtml(s.iccid_masked)} 📋</button>`
+                    : '<span class="font-mono text-slate-500">未读取 (点击下方检测卡槽触点)</span>'}
+                </div>
+                <div class="space-y-1">
+                  <div class="flex items-center justify-between text-[11px]">
+                    <span class="text-slate-400">本卡独立账期已用 (今日 ${formatBytes(tr.today_bytes || 0)})</span>
+                    <span class="font-mono font-semibold text-white">${formatBytes(usedBytes)} / ${capBytes > 0 ? formatBytes(capBytes) : '不限额'} ${overTag}</span>
+                  </div>
+                  ${capBytes > 0 ? `
+                    <div class="w-full h-1.5 bg-slate-800 rounded-full overflow-hidden">
+                      <div class="h-full ${usedPct >= 90 ? 'bg-rose-500' : (usedPct >= 75 ? 'bg-amber-400' : 'bg-cyan-400')}" style="width:${usedPct}%"></div>
+                    </div>
+                  ` : ''}
+                </div>
+              </div>
+
+              <!-- 射频 / VoLTE / VoNR 独立快捷开关 -->
+              <div class="flex flex-wrap items-center gap-2 text-[11px]">
+                <button onclick="toggleSlotRadio(${s.slot}, ${!s.radio_enabled})" class="px-2.5 py-1 rounded-lg border font-mono transition ${s.radio_enabled ? 'bg-emerald-500/15 border-emerald-500/35 text-emerald-300' : 'bg-slate-800 border-slate-700 text-slate-400'}">
+                  射频: ${s.radio_enabled ? '开启' : '关闭'}
+                </button>
+                <button onclick="toggleSlotVoice(${s.slot}, 'volte', ${!s.volte})" class="px-2.5 py-1 rounded-lg border font-mono transition ${s.volte ? 'bg-cyan-500/15 border-cyan-500/35 text-cyan-300' : 'bg-slate-800 border-slate-700 text-slate-400'}">
+                  VoLTE: ${s.volte ? '开' : '关'}
+                </button>
+                <button onclick="toggleSlotVoice(${s.slot}, 'vonr', ${!s.vonr})" class="px-2.5 py-1 rounded-lg border font-mono transition ${s.vonr ? 'bg-indigo-500/20 border-indigo-500/40 text-indigo-300' : 'bg-slate-800 border-slate-700 text-slate-400'}">
+                  5G VoNR: ${s.vonr ? '开' : '关'}
+                </button>
+                <span class="text-slate-500 font-mono ml-auto">APN: ${escapeHtml((s.apn_conf && s.apn_conf.apn) || '自动默认')}</span>
+              </div>
+
+              ${probeHtml}
+            </div>
+
+            <!-- 底部核心操作按钮组 -->
+            <div class="flex flex-wrap items-center gap-2 pt-2.5 border-t border-slate-800/80">
+              <button onclick="probeSimSlot(${s.slot})" id="btn-probe-slot-${s.slot}" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 font-semibold transition">
+                🔍 检测卡槽触点 (不断网)
+              </button>
+              ${!isAct ? `
+                <button onclick="switchActiveSim(${s.slot})" class="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition">
+                  ⚡ 切换至此卡上网
+                </button>
+                <button onclick="openFlashSwitchModal(${s.slot})" class="px-3 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-semibold transition" title="临时切往此卡收验证码，超时或收到短信自动切回主卡">
+                  ⏱️ 闪切接码
+                </button>
+              ` : `
+                <span class="px-3 py-1.5 rounded-xl bg-emerald-500/10 text-emerald-300 border border-emerald-500/25 font-semibold">
+                  ✅ 当前正在承担全机流量
+                </span>
+              `}
+              ${!s.boot_default ? `
+                <button onclick="setDefaultSimSlot(${s.slot})" class="px-2.5 py-1.5 rounded-xl bg-slate-800/80 hover:bg-slate-700 text-slate-300 border border-slate-700 transition ml-auto">
+                  设为开机默认
+                </button>
+              ` : ''}
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+
+    async function enableDualSimHot() {
+      showToast('正在启动 SIM 2 独立 AT Broker (nr4/nr5) 并开启热切就绪态...');
+      const res = await apiCall('sim.enable_live');
+      if (res && res.ok) {
+        showToast(res.msg || '双卡在线热切通道已激活！');
+        loadSimOverview(true);
+      } else {
+        showToast('激活失败: ' + ((res && res.msg) || ''), false);
+      }
+    }
+
+    async function probeSimSlot(slotNum) {
+      const btn = document.getElementById(`btn-probe-slot-${slotNum}`);
+      if (btn) { btn.disabled = true; btn.innerText = '🔍 正在读取触点...'; }
+      showToast(`正在无损探测 SIM ${slotNum} 物理触点、ICCID 与 eUICC ISD-R 通道（主卡不断网）...`);
+      try {
+        const res = await apiCall('sim.probe_slot', { slot: slotNum, power_sim: true, check_euicc: true });
+        if (res && res.ok) {
+          const okContact = !!res.contact_ok;
+          const aidStr = (res.aids && res.aids.length)
+            ? res.aids.map(a => `${a.type}(${a.aid.slice(0, 10)}..)`).join(', ')
+            : '标准 USIM';
+          const euiccLine = res.is_euicc
+            ? '✨ 检测到 ISD-R (A0000005591010...)：支持 9eSIM / ESTK / 5ber 写卡管理！'
+            : '普通实体 SIM / USIM 卡（未检出 eUICC ISD-R 容器）';
+          slotProbeOutputs[slotNum] = `
+            <div class="p-2.5 rounded-xl border font-mono text-[11px] space-y-1 ${okContact ? 'bg-emerald-950/30 border-emerald-500/40 text-emerald-200' : 'bg-rose-950/30 border-rose-500/40 text-rose-200'}">
+              <div class="font-bold font-sans">${okContact ? '✅ 8 触点通信全部正常！' : '❌ 未检测到有效 SIM 响应（请检查卡托方向或焊接触点）'}</div>
+              <div>CPIN: ${escapeHtml(res.cpin || '--')} · 运营商: ${escapeHtml(res.carrier || '--')}</div>
+              <div>ICCID: ${escapeHtml(res.iccid_masked || '无')} · IMSI: ${escapeHtml(res.imsi_masked || '无')}</div>
+              <div>应用目录: ${escapeHtml(aidStr)}</div>
+              <div class="text-cyan-300 font-sans">${escapeHtml(euiccLine)}</div>
+            </div>
+          `;
+          showToast(okContact ? `SIM ${slotNum} 触点与读卡检测通过！` : `SIM ${slotNum} 未读到卡片 (${res.cpin})`, okContact);
+          await loadSimOverview(false);
+        } else {
+          showToast('探测失败: ' + ((res && res.error) || ''), false);
+        }
+      } finally {
+        if (btn) { btn.disabled = false; btn.innerText = '🔍 检测卡槽触点 (不断网)'; }
+      }
+    }
+
+    async function switchActiveSim(targetSlot) {
+      const msg = `确定立即将蜂窝上网主卡热切换至【SIM ${targetSlot} (${targetSlot === 2 ? 'sipa_eth8' : 'sipa_eth0'})】吗？\n\n` +
+        `• 若改装后您在卡 2 插入了流量卡，切换后全机 Wi-Fi 与 Tailscale 将立即改走卡 ${targetSlot} 流量；\n` +
+        `• 安全防失联保护：若 SIM ${targetSlot} 在 45 秒内未能拨号获取 IP，系统将自动回退回原卡！`;
+      if (!confirm(msg)) return;
+      showToast(`已下发切卡任务：正在热切换至 SIM ${targetSlot}...`);
+      const res = await apiCall('sim.switch', { slot: targetSlot, wan_wait: 45, make_default: false });
+      if (res && res.ok) {
+        startSimSwitchPolling();
+      } else {
+        showToast('启动切卡失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    function startSimSwitchPolling() {
+      if (simSwitchPollTimer) return;
+      simSwitchPollTimer = setInterval(async () => {
+        const st = await apiCall('sim.switch_status');
+        if (!st || !st.ok) return; // 切卡期间短暂重连容错，继续等待
+        const sw = st.switch || {};
+        const fl = st.flash || {};
+        renderSimSwitchBanner(sw, fl);
+        if (!sw.running && !fl.running) {
+          clearInterval(simSwitchPollTimer);
+          simSwitchPollTimer = null;
+          if (fl.phase === 'done' && fl.finished_at) {
+            showToast(fl.msg || '闪切接码已完成并恢复主卡网络');
+          } else if (sw.finished_at) {
+            showToast(sw.msg || '双卡切换流程已结束', !!sw.ok);
+          }
+          loadNetworkTab();
+          fetchOverview(true);
+        }
+      }, 2500);
+    }
+
+    function openFlashSwitchModal(targetSlot) {
+      document.getElementById('sim-flash-target-slot').value = String(targetSlot);
+      document.getElementById('sim-flash-modal').classList.remove('hidden');
+    }
+
+    function closeFlashSwitchModal() {
+      document.getElementById('sim-flash-modal').classList.add('hidden');
+    }
+
+    async function submitFlashSwitch() {
+      const targetSlot = parseInt(document.getElementById('sim-flash-target-slot').value, 10) || 2;
+      const durationSec = parseInt(document.getElementById('sim-flash-duration').value, 10) || 120;
+      const returnOnSms = document.getElementById('sim-flash-early-return').checked;
+      const radioOnly = document.getElementById('sim-flash-radio-only').checked;
+      closeFlashSwitchModal();
+      showToast(`正在启动 SIM ${targetSlot} 闪切接码模式（最长 ${durationSec}s 后自动切回）...`);
+      const res = await apiCall('sim.flash_switch', {
+        slot: targetSlot,
+        duration_sec: durationSec,
+        return_on_sms: returnOnSms,
+        radio_only: radioOnly,
+      });
+      if (res && res.ok) {
+        startSimSwitchPolling();
+      } else {
+        showToast('启动闪切失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function cancelFlashSwitch() {
+      showToast('正在通知后台提前结束监听并切回主流量卡...');
+      await apiCall('sim.flash_cancel');
+    }
+
+    async function setDefaultSimSlot(slotNum) {
+      const res = await apiCall('sim.set', { slot: slotNum });
+      if (res && res.ok) {
+        showToast(`已将 SIM ${slotNum} 设为开机默认主卡`);
+        loadSimOverview(false);
+      } else {
+        showToast('设置默认卡失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function toggleSlotRadio(slotNum, turnOn) {
+      if (!turnOn && simOverviewCache && simOverviewCache.active_slot === slotNum) {
+        if (!confirm(`SIM ${slotNum} 是当前上网主卡，关闭其射频会暂停蜂窝网络，确定继续？`)) return;
+      }
+      showToast(`正在${turnOn ? '开启' : '关闭'} SIM ${slotNum} 射频...`);
+      const res = await apiCall('radio.set', { slot: slotNum, state: turnOn ? 'on' : 'off' });
+      if (res && res.ok) {
+        showToast(`SIM ${slotNum} 射频已${turnOn ? '开启' : '关闭'}`);
+        loadSimOverview(false);
+      } else {
+        showToast('操作失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function toggleSlotVoice(slotNum, kind, turnOn) {
+      const label = kind === 'vonr' ? '5G VoNR' : 'VoLTE';
+      showToast(`正在设置 SIM ${slotNum} ${label}: ${turnOn ? '开启' : '关闭'}...`);
+      const res = await apiCall('voice.set', { slot: slotNum, kind, state: turnOn ? 'on' : 'off' });
+      if (res && res.ok) {
+        showToast(`SIM ${slotNum} ${label} 已${turnOn ? '开启' : '关闭'}`);
+        loadSimOverview(false);
+      } else {
+        showToast('设置失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    function openSimProfileModal(slotNum) {
+      const s = (simOverviewCache && Array.isArray(simOverviewCache.slots))
+        ? simOverviewCache.slots.find(x => x.slot === slotNum)
+        : null;
+      if (!s || !s.iccid) {
+        showToast(`请先点击 SIM ${slotNum} 的「🔍 检测卡槽触点」读取卡片 ICCID 后再编辑档案`, false);
+        return;
+      }
+      const p = s.profile || {};
+      const tr = s.traffic || {};
+      document.getElementById('sim-prof-slot').value = String(slotNum);
+      document.getElementById('sim-prof-raw-iccid').value = s.iccid;
+      document.getElementById('sim-prof-modal-title').innerText = `编辑 SIM ${slotNum} 卡片档案与独立流量策略`;
+      document.getElementById('sim-prof-modal-iccid').innerText = `绑定 ICCID: ${s.iccid_masked} (${s.carrier || '自动识别'})`;
+      document.getElementById('sim-prof-nickname').value = p.nickname || '';
+      document.getElementById('sim-prof-phone').value = p.phone || '';
+      document.getElementById('sim-prof-carrier').value = p.carrier_custom || '';
+      document.getElementById('sim-prof-notes').value = p.notes || '';
+      document.getElementById('sim-prof-reset-day').value = p.reset_day || tr.reset_day || 1;
+      const capGb = p.cap_gb || (tr.cap_bytes ? +(tr.cap_bytes / 1073741824).toFixed(1) : 0);
+      document.getElementById('sim-prof-cap-gb').value = capGb;
+      document.getElementById('sim-prof-daily-gb').value = p.daily_gb || 0;
+      document.getElementById('sim-prof-warn-pct').value = p.warn_pct || tr.warn_pct || 85;
+      document.getElementById('sim-prof-over-action').value = p.over_limit_action || 'none';
+      document.getElementById('sim-profile-modal').classList.remove('hidden');
+    }
+
+    function closeSimProfileModal() {
+      document.getElementById('sim-profile-modal').classList.add('hidden');
+    }
+
+    async function submitSimProfile() {
+      const req = {
+        slot: parseInt(document.getElementById('sim-prof-slot').value, 10) || 1,
+        iccid: document.getElementById('sim-prof-raw-iccid').value,
+        nickname: document.getElementById('sim-prof-nickname').value.trim(),
+        phone: document.getElementById('sim-prof-phone').value.trim(),
+        carrier_custom: document.getElementById('sim-prof-carrier').value.trim(),
+        notes: document.getElementById('sim-prof-notes').value.trim(),
+        reset_day: parseInt(document.getElementById('sim-prof-reset-day').value, 10) || 1,
+        cap_gb: parseFloat(document.getElementById('sim-prof-cap-gb').value) || 0,
+        daily_gb: parseFloat(document.getElementById('sim-prof-daily-gb').value) || 0,
+        warn_pct: parseInt(document.getElementById('sim-prof-warn-pct').value, 10) || 85,
+        over_limit_action: document.getElementById('sim-prof-over-action').value || 'none',
+      };
+      showToast('正在保存 SIM 卡片档案与独立流量策略...');
+      const res = await apiCall('sim.card_save', req);
+      if (res && res.ok) {
+        closeSimProfileModal();
+        showToast(res.msg || 'SIM 卡片档案已保存');
+        loadSimOverview(false);
+        fetchOverview(true);
+      } else {
+        showToast('保存失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    // =========================================================================
+    // 移动网络 Tab 完整实现 (双卡中心 + 5步体检 + IP读取 + 频段锁定 + 分卡槽APN)
+    // =========================================================================
+    async function loadSlotApnForm(slotVal) {
+      const sl = parseInt(slotVal, 10) || 1;
+      const res = await apiCall('data.get', { slot: sl });
+      if (!res || !res.ok) return;
+      if (document.getElementById('apn-name')) document.getElementById('apn-name').value = res.apn || '';
+      if (document.getElementById('apn-pdp') && res.pdp) document.getElementById('apn-pdp').value = res.pdp;
+      if (document.getElementById('apn-auth') && res.auth) document.getElementById('apn-auth').value = res.auth;
+      if (document.getElementById('apn-user')) document.getElementById('apn-user').value = res.user || '';
+      if (document.getElementById('apn-pass')) document.getElementById('apn-pass').value = '';
+      const passHint = document.getElementById('apn-pass-hint');
+      if (passHint) passHint.innerText = res.password_set ? '(已设置密码)' : '';
+      const roamCb = document.getElementById('apn-roaming');
+      if (roamCb && res.roaming) {
+        roamCb.checked = (Array.isArray(res.roaming.slots) && res.roaming.slots.length >= sl)
+          ? !!res.roaming.slots[sl - 1]
+          : !!res.roaming.allowed;
+      }
+    }
+
     async function loadNetworkTab() {
+      loadSimOverview(false);
+      loadCellularHealth(false);
+
       const res = await apiCall('data.get');
       if (res && res.ok) {
         const localIpv4 = res.ipv4 || (res.address ? res.address.split('/')[0] : '');
@@ -2955,6 +4038,7 @@
         const netRoamEl = document.getElementById('net-roaming');
         if (netRoamEl && res.roaming) {
           netRoamEl.innerText = res.roaming.allowed ? '已允许' : '已关闭';
+          netRoamEl.className = res.roaming.allowed ? 'font-bold text-emerald-400 mt-0.5' : 'font-bold text-amber-400 mt-0.5';
         }
 
         const btnData = document.getElementById('btn-toggle-data');
@@ -2965,10 +4049,14 @@
             : 'px-3 py-1 rounded-lg bg-slate-800 text-slate-400 font-semibold text-xs border border-slate-700 transition';
         }
 
-        if (document.getElementById('apn-name')) {
+        const targetSlotEl = document.getElementById('apn-target-slot');
+        const selSlot = targetSlotEl ? parseInt(targetSlotEl.value, 10) : (res.slot || 1);
+        if (selSlot === (res.slot || 1) && document.getElementById('apn-name')) {
           document.getElementById('apn-name').value = res.apn || '';
           if (res.pdp) document.getElementById('apn-pdp').value = res.pdp;
           if (res.auth) document.getElementById('apn-auth').value = res.auth;
+          if (document.getElementById('apn-user')) document.getElementById('apn-user').value = res.user || '';
+          if (document.getElementById('apn-roaming') && res.roaming) document.getElementById('apn-roaming').checked = !!res.roaming.allowed;
         }
       }
 
@@ -3053,7 +4141,7 @@
       const isUp = btn && btn.innerText.includes('开启');
       showToast(isUp ? '正在关闭蜂窝移动数据...' : '正在开启蜂窝移动数据...');
       await apiCall('data.power', { state: isUp ? 'off' : 'on' });
-      setTimeout(loadNetworkTab, 3000);
+      setTimeout(loadNetworkTab, 2500);
     }
 
     async function saveBandLock() {
@@ -3117,21 +4205,31 @@
     }
 
     async function saveApnConfig() {
+      const slot = parseInt((document.getElementById('apn-target-slot') && document.getElementById('apn-target-slot').value) || '1', 10) || 1;
       const apn = document.getElementById('apn-name').value.trim();
       const pdp = document.getElementById('apn-pdp').value;
       const auth = document.getElementById('apn-auth').value;
-      showToast('正在保存 APN 设置并重连移动数据...');
-      const res = await apiCall('data.set', { apn, pdp, auth });
+      const user = (document.getElementById('apn-user') && document.getElementById('apn-user').value.trim()) || '';
+      const pass = (document.getElementById('apn-pass') && document.getElementById('apn-pass').value) || '';
+      const roaming = document.getElementById('apn-roaming') ? document.getElementById('apn-roaming').checked : true;
+
+      const req = { slot, apn, pdp, auth, user, roaming };
+      if (pass) req.password = pass;
+
+      const isAct = !simOverviewCache || simOverviewCache.active_slot === slot;
+      showToast(isAct ? `正在保存 SIM ${slot} APN 并重拨生效...` : `正在预存 SIM ${slot} 专属 APN 与漫游设定 (不中断当前主卡网络)...`);
+      const res = await apiCall('data.set', req);
       if (res && res.ok) {
-        showToast('APN 已保存，网络正在重连');
-        setTimeout(loadNetworkTab, 3500);
+        if (document.getElementById('apn-pass')) document.getElementById('apn-pass').value = '';
+        showToast(isAct ? `SIM ${slot} APN 已应用并正在重连` : `SIM ${slot} 专属 APN 与漫游配置已保存，切换至该卡时将自动生效`);
+        setTimeout(() => { loadNetworkTab(); }, isAct ? 3000 : 600);
       } else {
         showToast('保存失败: ' + (res.error || ''), false);
       }
     }
 
     // =========================================================================
-    // 流量统计 Tab 完整实现 (修复 108G 保存还原与历史用量读取)
+    // 流量统计 Tab 完整实现 (按 ICCID 独立账本 + 超额自动切备用 SIM 卡联动)
     // =========================================================================
     const GIB_BYTES = 1073741824;
 
@@ -3139,10 +4237,20 @@
       const tbody = document.getElementById('traffic-history-tbody');
       if (tbody) tbody.innerHTML = '<tr><td colspan="4" class="py-4 text-center text-slate-500 font-sans">正在读取流量记录...</td></tr>';
 
-      const res = await apiCall('traffic.get');
+      const [res, simOv] = await Promise.all([apiCall('traffic.get'), apiCall('sim.overview')]);
+      let activeSlotObj = null;
+      if (simOv && simOv.ok && Array.isArray(simOv.slots)) {
+        simOverviewCache = simOv;
+        activeSlotObj = simOv.slots.find(x => x.active) || null;
+        const badgeEl = document.getElementById('traffic-active-sim-badge');
+        if (badgeEl && activeSlotObj) {
+          const nick = (activeSlotObj.profile && activeSlotObj.profile.nickname) || `SIM ${activeSlotObj.slot}`;
+          badgeEl.innerText = `当前账本绑定: ${nick} · ${activeSlotObj.iccid_masked || 'ICCID未读'} (${activeSlotObj.iface})`;
+        }
+      }
+
       if (res && res.traffic) {
         const t = res.traffic;
-        // 1. 回显配额配置项
         const resetInput = document.getElementById('traffic-reset-day');
         if (resetInput) resetInput.value = t.reset_day || 1;
 
@@ -3151,13 +4259,24 @@
         const limitInput = document.getElementById('traffic-limit-gb');
         if (limitInput) limitInput.value = capGb;
 
+        const dailyBytes = (t.daily && t.daily.bytes) ? Number(t.daily.bytes) : 0;
+        const dailyGb = dailyBytes > 0 ? +(dailyBytes / GIB_BYTES).toFixed(1) : ((activeSlotObj && activeSlotObj.profile && activeSlotObj.profile.daily_gb) || 0);
+        const dailyInput = document.getElementById('traffic-daily-gb');
+        if (dailyInput) dailyInput.value = dailyGb;
+
         const warnInput = document.getElementById('traffic-warn-pct');
         if (warnInput) warnInput.value = (t.cap && t.cap.warn) ? Number(t.cap.warn) : 80;
 
-        const cutToggle = document.getElementById('traffic-cut-toggle');
-        if (cutToggle) cutToggle.checked = !!(t.cap && t.cap.cut);
+        const overSelect = document.getElementById('traffic-over-action');
+        if (overSelect) {
+          const profAct = activeSlotObj && activeSlotObj.profile && activeSlotObj.profile.over_limit_action;
+          if (profAct && profAct !== 'none') {
+            overSelect.value = profAct;
+          } else {
+            overSelect.value = (t.cap && t.cap.cut) ? 'cut_data' : 'none';
+          }
+        }
 
-        // 2. 渲染历史每日消耗表格
         if (tbody) {
           const days = t.days || [];
           if (days.length > 0) {
@@ -3184,21 +4303,37 @@
     }
 
     async function saveTrafficQuota() {
-      const resetDay = parseInt(document.getElementById('traffic-reset-day').value) || 1;
+      const resetDay = parseInt(document.getElementById('traffic-reset-day').value, 10) || 1;
       const limitGb = parseFloat(document.getElementById('traffic-limit-gb').value) || 0;
-      const warnPct = Math.min(99, Math.max(50, parseInt((document.getElementById('traffic-warn-pct') && document.getElementById('traffic-warn-pct').value) || 80)));
-      const cut = document.getElementById('traffic-cut-toggle').checked ? 'on' : 'off';
+      const dailyGb = parseFloat((document.getElementById('traffic-daily-gb') && document.getElementById('traffic-daily-gb').value) || 0) || 0;
+      const warnPct = Math.min(99, Math.max(50, parseInt((document.getElementById('traffic-warn-pct') && document.getElementById('traffic-warn-pct').value) || 80, 10)));
+      const overAction = (document.getElementById('traffic-over-action') && document.getElementById('traffic-over-action').value) || 'none';
+      const cut = overAction === 'cut_data' ? 'on' : 'off';
       const capBytes = String(Math.round(limitGb * GIB_BYTES));
+      const dailyBytes = String(Math.round(dailyGb * GIB_BYTES));
 
-      showToast('正在保存流量配额与预警设置...');
+      showToast('正在保存当前 SIM 卡独立流量配额与超额保护策略...');
       await apiCall('traffic.set', { key: 'reset_day', value: resetDay });
       await apiCall('traffic.set', { key: 'cap', value: capBytes });
+      await apiCall('traffic.set', { key: 'daily', value: dailyBytes });
       await apiCall('traffic.set', { key: 'warn', value: warnPct });
       await apiCall('traffic.set', { key: 'cut', value: cut });
+      await apiCall('traffic.set', { key: 'daily_cut', value: cut });
 
-      showToast(`流量配额已保存: 每月${resetDay}日重置，上限 ${limitGb} GB (超 ${warnPct}% 预警)`);
+      const activeSlotNum = (simOverviewCache && simOverviewCache.active_slot) || 1;
+      await apiCall('sim.card_save', {
+        slot: activeSlotNum,
+        reset_day: resetDay,
+        cap_gb: limitGb,
+        daily_gb: dailyGb,
+        warn_pct: warnPct,
+        over_limit_action: overAction,
+      });
+
+      const actLabel = overAction === 'switch_sim' ? '超额自动热切备用卡' : (overAction === 'cut_data' ? '超额断网' : '仅预警');
+      showToast(`已保存: 每月${resetDay}日重置，月限 ${limitGb} GB · 策略: ${actLabel}`);
       loadTrafficStats();
-      fetchOverview();
+      fetchOverview(true);
     }
 
     // =========================================================================

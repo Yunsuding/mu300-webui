@@ -1,0 +1,13 @@
+[Unit]
+Description=MU300 dual-SIM boot slot & radio-freeze preparation (U30 Air)
+DefaultDependencies=no
+After=local-fs.target mu300-vendor.service
+Before=mu300-atd.service mu300-atd2.service mu300-atd4.service mu300-atd5.service mu300-mobile-data.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/mu300/bin/mu300-sim-boot-prep boot
+
+[Install]
+WantedBy=multi-user.target

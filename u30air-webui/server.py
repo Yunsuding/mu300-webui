@@ -55,7 +55,31 @@ SESSIONS = {}
 STATE_LOCK = threading.RLock()
 AT_LOCK = threading.Lock()
 STATIC_ASSET_CACHE = {}
-NET_PREV = {"time": time.time(), "rx": 0, "tx": 0, "rx_rate": 0, "tx_rate": 0}
+NET_PREV = {"time": time.time(), "rx": 0, "tx": 0, "rx_rate": 0, "tx_rate": 0, "iface": "sipa_eth0"}
+
+def get_active_sim_slot_idx():
+    """零子进程读取当前生效的物理 SIM 卡槽索引 (0=SIM1/sipa_eth0, 1=SIM2/sipa_eth8)"""
+    for p in ("/run/mu300/sim-slot", "/etc/mu300-sim-slot"):
+        if os.path.exists(p):
+            try:
+                with open(p, "r", encoding="utf-8", errors="ignore") as f:
+                    v = f.read().strip()
+                if v in ("0", "1"):
+                    return int(v)
+            except OSError:
+                pass
+    return 0
+
+def get_slot_at_dir(slot_idx=None):
+    """返回指定卡槽对应的 AT 守护管道目录"""
+    idx = get_active_sim_slot_idx() if slot_idx is None else int(slot_idx)
+    if idx == 1 and (os.path.exists("/run/mu300-at4/cmd") or os.path.exists("/run/mu300-radio-freeze")):
+        return "/run/mu300-at4"
+    return "/run/mu300-at"
+
+def get_active_cellular_iface():
+    """根据当前活动卡槽返回对应的数据承载网卡 (SIM1 -> sipa_eth0, SIM2 -> sipa_eth8)"""
+    return "sipa_eth8" if get_active_sim_slot_idx() == 1 else "sipa_eth0"
 
 def _atomic_write_text(filepath, content, mode=None):
     """原子写入配置文件，防止断电或多线程并发导致 JSON/YAML 半写损坏"""
@@ -80,33 +104,49 @@ def _atomic_write_text(filepath, content, mode=None):
                 pass
 
 def get_realtime_traffic():
-    """实时读取 /proc/net/dev 获取微秒级精确上下行网速"""
+    """实时读取 /proc/net/dev 获取当前活动 SIM 承载网卡微秒级精确上下行网速"""
     global NET_PREV
     with STATE_LOCK:
         now = time.time()
+        slot_idx = get_active_sim_slot_idx()
+        active_iface = "sipa_eth8" if slot_idx == 1 else "sipa_eth0"
+        if NET_PREV.get("iface") != active_iface:
+            NET_PREV = {"time": now, "rx": 0, "tx": 0, "rx_rate": 0.0, "tx_rate": 0.0, "iface": active_iface}
         dt = max(0.2, now - NET_PREV["time"])
         try:
             with open("/proc/net/dev", "r") as f:
                 lines = f.readlines()
+            dev_map = {}
             for line in lines[2:]:
                 parts = line.split(":")
-                if len(parts) == 2 and parts[0].strip() == "sipa_eth0":
-                    fields = parts[1].split()
-                    rx = int(fields[0])
-                    tx = int(fields[8])
-                    if NET_PREV["rx"] > 0:
-                        rx_rate = max(0.0, (rx - NET_PREV["rx"]) / dt)
-                        tx_rate = max(0.0, (tx - NET_PREV["tx"]) / dt)
-                        NET_PREV["rx_rate"] = rx_rate
-                        NET_PREV["tx_rate"] = tx_rate
-                    NET_PREV["rx"] = rx
-                    NET_PREV["tx"] = tx
-                    NET_PREV["time"] = now
-                    break
+                if len(parts) == 2:
+                    dev_map[parts[0].strip()] = parts[1].split()
+            chosen = active_iface if active_iface in dev_map else ("sipa_eth0" if "sipa_eth0" in dev_map else ("sipa_eth8" if "sipa_eth8" in dev_map else active_iface))
+            fields = dev_map.get(chosen)
+            if fields and len(fields) >= 9:
+                rx = int(fields[0])
+                tx = int(fields[8])
+                if NET_PREV.get("iface") != chosen:
+                    NET_PREV["iface"] = chosen
+                    NET_PREV["rx"] = 0
+                    NET_PREV["tx"] = 0
+                if NET_PREV["rx"] > 0 and rx >= NET_PREV["rx"] and tx >= NET_PREV["tx"]:
+                    rx_rate = max(0.0, (rx - NET_PREV["rx"]) / dt)
+                    tx_rate = max(0.0, (tx - NET_PREV["tx"]) / dt)
+                    NET_PREV["rx_rate"] = rx_rate
+                    NET_PREV["tx_rate"] = tx_rate
+                else:
+                    NET_PREV["rx_rate"] = 0.0
+                    NET_PREV["tx_rate"] = 0.0
+                NET_PREV["rx"] = rx
+                NET_PREV["tx"] = tx
+                NET_PREV["time"] = now
         except Exception:
             pass
         return {
             "ok": 1,
+            "iface": NET_PREV.get("iface", active_iface),
+            "sim_slot": slot_idx + 1,
             "rx_rate": NET_PREV["rx_rate"],
             "tx_rate": NET_PREV["tx_rate"],
             "rx_bytes": NET_PREV["rx"],
@@ -137,22 +177,33 @@ def get_cellular_qos(force_static=False):
     """实时读取蜂窝射频与 QoS 签约状态 (信号 12s 缓存，运营商/签约速率 300s 长缓存，AT 串口互斥)"""
     global CELLULAR_CACHE
     now = time.time()
-    if not force_static and now - CELLULAR_CACHE["time"] < 12 and CELLULAR_CACHE["data"]:
+    slot_idx = get_active_sim_slot_idx()
+    slot_changed = (CELLULAR_CACHE.get("slot") != slot_idx)
+    if not force_static and not slot_changed and now - CELLULAR_CACHE["time"] < 12 and CELLULAR_CACHE["data"]:
         return CELLULAR_CACHE["data"]
+
+    if os.path.exists("/run/mu300/sim-switching"):
+        return dict(CELLULAR_CACHE["data"])
 
     if not AT_LOCK.acquire(timeout=1.5):
         return dict(CELLULAR_CACHE["data"])
 
     try:
         now = time.time()
-        if not force_static and now - CELLULAR_CACHE["time"] < 12 and CELLULAR_CACHE["data"]:
+        slot_idx = get_active_sim_slot_idx()
+        slot_changed = (CELLULAR_CACHE.get("slot") != slot_idx)
+        if not force_static and not slot_changed and now - CELLULAR_CACHE["time"] < 12 and CELLULAR_CACHE["data"]:
             return CELLULAR_CACHE["data"]
 
         data = dict(CELLULAR_CACHE["data"])
+        data["sim_slot"] = slot_idx + 1
+        data["iface"] = "sipa_eth8" if slot_idx == 1 else "sipa_eth0"
         at_bin = "/opt/mu300/bin/mu300-at"
-        need_static = force_static or (now - CELLULAR_CACHE.get("static_time", 0) >= 300)
+        at_env = dict(os.environ, MU300_AT_DIR=get_slot_at_dir(slot_idx), MU300_SIM_SLOT=str(slot_idx))
+        need_static = force_static or slot_changed or (now - CELLULAR_CACHE.get("static_time", 0) >= 300)
         if os.path.exists(at_bin):
-            proc = subprocess.run([at_bin, "AT+CESQ"], capture_output=True, text=True, timeout=3)
+            # 1. 信号质量 (CESQ: ss_rsrq, ss_rsrp, ss_sinr) - 每次缓存到期刷新
+            proc = subprocess.run([at_bin, "AT+CESQ"], capture_output=True, text=True, timeout=3, env=at_env)
             out = proc.stdout
             m = re.search(r'\+CESQ:\s*(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)(?:,(\d+),(\d+),(\d+))?', out)
             if m:
@@ -171,10 +222,11 @@ def get_cellular_qos(force_static=False):
                     data["sinr"] = round(-23.0 + int(ss_sinr) * 0.5, 1)
 
             if need_static:
-                proc = subprocess.run([at_bin, "AT+C5GQOSRDP=1"], capture_output=True, text=True, timeout=3)
+                # 2. 签约 QoS 状态 (C5GQOSRDP / CGEQOSRDP: QCI 与 AMBR 签约速率，5 分钟刷新一次)
+                proc = subprocess.run([at_bin, "AT+C5GQOSRDP=1"], capture_output=True, text=True, timeout=3, env=at_env)
                 out = proc.stdout
                 if "+C5GQOSRDP:" not in out:
-                    proc = subprocess.run([at_bin, "AT+CGEQOSRDP=1"], capture_output=True, text=True, timeout=3)
+                    proc = subprocess.run([at_bin, "AT+CGEQOSRDP=1"], capture_output=True, text=True, timeout=3, env=at_env)
                     out = proc.stdout
 
                 m = re.search(r'\+(?:C5GQOSRDP|CGEQOSRDP):\s*(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+),(\d+)', out)
@@ -198,7 +250,8 @@ def get_cellular_qos(force_static=False):
                     data["dl_rate_str"] = fmt(dl)
                     data["ul_rate_str"] = fmt(ul)
 
-                proc = subprocess.run([at_bin, "AT+COPS?"], capture_output=True, text=True, timeout=3)
+                # 3. 运营商与制式 (COPS，5 分钟刷新一次)
+                proc = subprocess.run([at_bin, "AT+COPS?"], capture_output=True, text=True, timeout=3, env=at_env)
                 out = proc.stdout
                 m = re.search(r'\+COPS:\s*(\d+),(\d+),"(\d+)"(?:,(\d+))?', out)
                 if m:
@@ -262,6 +315,7 @@ def get_cellular_qos(force_static=False):
                     data["band"] = "B39"
 
         CELLULAR_CACHE["time"] = now
+        CELLULAR_CACHE["slot"] = slot_idx
         CELLULAR_CACHE["data"] = data
     except Exception as e:
         print(f"[Cellular QoS Error] {e}")
@@ -272,6 +326,7 @@ def get_cellular_qos(force_static=False):
 
 CELLULAR_IP_CACHE = {
     "time": 0,
+    "slot": 0,
     "data": {
         "ipv4": "",
         "public_ipv4": "",
@@ -287,20 +342,24 @@ PUBLIC_IP_CACHE = {
 }
 
 def fetch_public_ipv4():
-    """获取移动蜂窝网络真实公网出口 IPv4 (直接绑定 sipa_eth0 网卡，防止被本地代理干扰)"""
-    # 方式 1: 优先直接绑定 sipa_eth0 接口执行 curl 获取真实蜂窝出口
-    try:
-        proc = subprocess.run(
-            ["curl", "--interface", "sipa_eth0", "-4", "-s", "--connect-timeout", "2", "http://myip.ipip.net"],
-            capture_output=True, text=True, timeout=2.5
-        )
-        m = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', proc.stdout)
-        if m:
-            ip = m.group(0)
-            if not ip.startswith(("10.", "192.168.", "172.16.", "127.", "100.")):
-                return ip
-    except Exception:
-        pass
+    """获取移动蜂窝网络真实公网出口 IPv4 (优先绑定当前活动 sipa_eth* 网卡，防止被本地代理干扰)"""
+    primary_iface = get_active_cellular_iface()
+    candidate_ifaces = [primary_iface] + [x for x in ("sipa_eth0", "sipa_eth8") if x != primary_iface]
+    for c_iface in candidate_ifaces:
+        if not os.path.exists(f"/sys/class/net/{c_iface}"):
+            continue
+        try:
+            proc = subprocess.run(
+                ["curl", "--interface", c_iface, "-4", "-s", "--connect-timeout", "2", "http://myip.ipip.net"],
+                capture_output=True, text=True, timeout=2.5
+            )
+            m = re.search(r'\b(?:\d{1,3}\.){3}\d{1,3}\b', proc.stdout)
+            if m:
+                ip = m.group(0)
+                if not ip.startswith(("10.", "192.168.", "172.16.", "127.", "100.")):
+                    return ip
+        except Exception:
+            pass
 
     # 方式 2: 国内外高可用接口直连
     endpoints = [
@@ -345,11 +404,12 @@ def update_public_ip_async():
     t.start()
 
 def get_cellular_ip_info():
-    """获取移动蜂窝网络的内网 IPv4、公网出口 IPv4 与 IPv6 地址 (毫秒级响应)"""
+    """获取移动蜂窝网络的内网 IPv4、公网出口 IPv4 与 IPv6 地址 (毫秒级响应，支持 SIM1 sipa_eth0 / SIM2 sipa_eth8)"""
     global CELLULAR_IP_CACHE
     now = time.time()
-    if now - CELLULAR_IP_CACHE["time"] < 3 and CELLULAR_IP_CACHE["data"].get("ipv4"):
-        # 补充异步更新公网 IP
+    slot_idx = get_active_sim_slot_idx()
+    primary_iface = "sipa_eth8" if slot_idx == 1 else "sipa_eth0"
+    if CELLULAR_IP_CACHE.get("slot") == slot_idx and now - CELLULAR_IP_CACHE["time"] < 3 and CELLULAR_IP_CACHE["data"].get("ipv4"):
         update_public_ip_async()
         ret = dict(CELLULAR_IP_CACHE["data"])
         if PUBLIC_IP_CACHE["ip"]:
@@ -360,11 +420,12 @@ def get_cellular_ip_info():
         "ipv4": "",
         "public_ipv4": PUBLIC_IP_CACHE["ip"],
         "ipv6": "",
-        "iface": "sipa_eth0"
+        "iface": primary_iface,
+        "sim_slot": slot_idx + 1,
     }
 
-    # 1. 获取蜂窝接口内网 IPv4 (优先通过 socket ioctl 获取 sipa_eth0 地址，零子进程)
-    target_ifaces = ["sipa_eth0", "sipa_eth1"]
+    # 1. 获取蜂窝接口内网 IPv4 (优先通过 socket ioctl 获取活动 sipa_eth* 地址，零子进程)
+    target_ifaces = [primary_iface] + [x for x in ("sipa_eth0", "sipa_eth8", "sipa_eth1") if x != primary_iface]
     for iface in target_ifaces:
         if fcntl:
             try:
@@ -382,16 +443,18 @@ def get_cellular_ip_info():
             except Exception:
                 pass
 
-    # 2. 如果 ioctl 未获取到，解析 ip -4 addr show sipa_eth0
+    # 2. 如果 ioctl 未获取到，解析 ip -4 addr show <iface>
     if not info["ipv4"]:
-        try:
-            proc = subprocess.run(["ip", "-4", "addr", "show", "sipa_eth0"], capture_output=True, text=True, timeout=1.5)
-            m = re.search(r'inet\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)', proc.stdout)
-            if m:
-                info["ipv4"] = m.group(1)
-                info["iface"] = "sipa_eth0"
-        except Exception:
-            pass
+        for iface in target_ifaces[:2]:
+            try:
+                proc = subprocess.run(["ip", "-4", "addr", "show", iface], capture_output=True, text=True, timeout=1.5)
+                m = re.search(r'inet\s+([0-9]+\.[0-9]+\.[0-9]+\.[0-9]+)', proc.stdout)
+                if m:
+                    info["ipv4"] = m.group(1)
+                    info["iface"] = iface
+                    break
+            except Exception:
+                pass
 
     # 3. 触发公网 IPv4 探测与获取
     update_public_ip_async()
@@ -452,6 +515,7 @@ def get_cellular_ip_info():
             pass
 
     CELLULAR_IP_CACHE["time"] = now
+    CELLULAR_IP_CACHE["slot"] = slot_idx
     CELLULAR_IP_CACHE["data"] = info
     return info
 
@@ -2555,17 +2619,25 @@ def drop_memory_caches():
     }
 
 def run_mu300_api(method, req=None):
-    """调用底层的 mu300-api"""
+    """调用底层的 mu300-api（支持 sms.* / ussd.* 按卡槽透明透传 MU300_SIM_SLOT）"""
     if not os.path.exists(API_BIN):
         return {"ok": 0, "error": f"API binary {API_BIN} not found"}
     try:
-        payload = json.dumps(req or {})
+        req_clean = dict(req) if isinstance(req, dict) else (req or {})
+        env = None
+        if isinstance(req_clean, dict) and method.startswith(("sms.", "ussd.")) and "slot" in req_clean:
+            s_val = req_clean.pop("slot")
+            if str(s_val) in ("1", "2"):
+                s_idx = int(s_val) - 1
+                env = dict(os.environ, MU300_SIM_SLOT=str(s_idx), MU300_AT_DIR=get_slot_at_dir(s_idx))
+        payload = json.dumps(req_clean)
         proc = subprocess.Popen(
             [API_BIN, method],
             stdin=subprocess.PIPE,
             stdout=subprocess.PIPE,
             stderr=subprocess.PIPE,
-            text=True
+            text=True,
+            env=env,
         )
         stdout, stderr = proc.communicate(input=payload, timeout=25)
         for line in reversed(stdout.strip().split("\n")):
@@ -2932,7 +3004,8 @@ def get_overview_data(req=None):
     elif os.path.exists("/sys/class/thermal"):
         data["thermal_details"] = get_thermal_details()
     data["wifi_clients_count"] = len(get_connected_stations())
-    if os.path.exists("/sys/class/net/sipa_eth0"):
+    data["active_sim_slot"] = get_active_sim_slot_idx() + 1
+    if os.path.exists("/sys/class/net/sipa_eth0") or os.path.exists("/sys/class/net/sipa_eth8"):
         cell_ip = get_cellular_ip_info()
         data["cellular_ip"] = cell_ip
         if "data" not in data or not isinstance(data["data"], dict):
@@ -3077,6 +3150,1766 @@ def handle_power_api(method, req_data):
         }
 
     return None
+
+# =========================================================================
+# Phase 1: 双卡数字档案、无损触点检测、Ubuntu 在线热切/闪切接码、按 ICCID 独立流量账本、
+#          5 步蜂窝健康诊断、短信 OTP 识别、Bark/TG/Webhook 推送与信令语音保号
+# =========================================================================
+SIM_CARDS_FILE = "/etc/mu300/sim-cards.json"
+SIM_SLOT_CACHE_FILE = "/etc/mu300/sim-slot-cache.json"
+COMM_PUSH_CONF_FILE = "/etc/mu300/webui-comm-push.json"
+COMM_PUSH_SEEN_FILE = "/etc/mu300/webui-comm-seen.json"
+COMM_EVENTS_FILE = "/run/mu300/webui-comm-events.json"
+
+AT_SLOT_LOCKS = [AT_LOCK, threading.Lock()]
+SIM_SWITCH_LOCK = threading.Lock()
+FLASH_CANCEL_EVENT = threading.Event()
+TRAFFIC_SWAP_LOCK = threading.Lock()
+TRAFFIC_API_CACHE = {"time": 0.0, "data": None}
+
+SIM_SWITCH_STATE = {
+    "running": False,
+    "phase": "idle",
+    "from_slot": 1,
+    "target_slot": 1,
+    "started_at": 0.0,
+    "finished_at": 0.0,
+    "ok": None,
+    "msg": "",
+    "error": "",
+    "reason": "",
+}
+
+FLASH_SWITCH_STATE = {
+    "running": False,
+    "phase": "idle",
+    "orig_slot": 1,
+    "target_slot": 2,
+    "duration_sec": 120,
+    "started_at": 0.0,
+    "deadline": 0.0,
+    "finished_at": 0.0,
+    "return_on_sms": True,
+    "radio_only": True,
+    "captured_sms": [],
+    "msg": "",
+    "error": "",
+}
+
+EUICC_ISDR_AIDS = (
+    "A0000005591010FFFFFFFF8900000100",
+    "A0000005591010FFFFFFFF8900050500",
+)
+
+def mask_iccid(iccid):
+    s = re.sub(r"[^0-9A-Fa-f]", "", str(iccid or "")).upper()
+    if len(s) >= 12:
+        return f"{s[:6]}••••••{s[-4:]}"
+    return s
+
+def mask_imsi(imsi):
+    s = re.sub(r"[^0-9]", "", str(imsi or ""))
+    if len(s) >= 10:
+        return f"{s[:5]}••••••{s[-2:]}"
+    return s
+
+def guess_carrier_from_ids(iccid="", imsi="", oper_code=""):
+    imsi_s = re.sub(r"[^0-9]", "", str(imsi or ""))
+    iccid_s = re.sub(r"[^0-9A-Fa-f]", "", str(iccid or "")).upper()
+    plmn = str(oper_code or "")[:5] or imsi_s[:5]
+    plmn_map = {
+        "46000": "中国移动", "46002": "中国移动", "46004": "中国移动", "46007": "中国移动", "46008": "中国移动", "46013": "中国移动",
+        "46001": "中国联通", "46006": "中国联通", "46009": "中国联通",
+        "46003": "中国电信", "46005": "中国电信", "46011": "中国电信",
+        "46015": "中国广电",
+        "45400": "CSL HK", "45403": "3HK", "45406": "SmarTone", "45412": "中国移动香港", "45416": "PCCW-HKT",
+        "45501": "CTM 澳门电讯", "46692": "中华电信",
+        "31026": "T-Mobile US", "31024": "T-Mobile US", "31041": "AT&T US", "31015": "AT&T US", "31148": "Verizon US",
+        "23410": "O2 / giffgaff UK", "23415": "Vodafone UK", "23430": "EE UK",
+        "44010": "NTT Docomo", "44020": "SoftBank", "44050": "KDDI au",
+    }
+    if plmn in plmn_map:
+        return plmn_map[plmn]
+    if iccid_s.startswith(("898600", "898602", "898604", "898607", "898608")):
+        return "中国移动"
+    if iccid_s.startswith(("898601", "898606", "898609")):
+        return "中国联通"
+    if iccid_s.startswith(("898603", "898611")):
+        return "中国电信"
+    if iccid_s.startswith("898615"):
+        return "中国广电"
+    if iccid_s.startswith("89852"):
+        return "中国香港运营商"
+    if iccid_s.startswith("8901"):
+        return "美国运营商 (US)"
+    if iccid_s.startswith("8944"):
+        return "英国运营商 (UK)"
+    return ""
+
+def extract_sms_otp(text):
+    """智能提取短信中的 4~8 位数字验证码 (兼容中英文常见模板，避开手机号与年份)"""
+    msg = str(text or "")
+    if not msg:
+        return ""
+    kw_re = re.compile(
+        r"(?:验证码|校验码|动态码|确认码|安全码|认证码|随机码|口令|verification\s*code|security\s*code|auth\s*code|passcode|otp|code|pin)",
+        re.IGNORECASE,
+    )
+    if not kw_re.search(msg):
+        return ""
+    # 优先匹配紧邻关键词前后的 4~8 位验证码
+    near_patterns = [
+        r"(?:验证码|校验码|动态码|确认码|安全码|认证码|随机码|code|otp|pin|passcode)(?:\s*(?:is|for|为|是))?[\s:：\-]*([0-9]{4,8})(?![0-9])",
+        r"(?<![0-9])([0-9]{4,8})[\s,，。.)）]*(?:为|是)?(?:您的|本次|登录|注册|动态)?(?:验证码|校验码|动态码|确认码|verification\s*code|otp)",
+    ]
+    for pat in near_patterns:
+        m = re.search(pat, msg, re.IGNORECASE)
+        if m:
+            cand = m.group(1)
+            if not re.fullmatch(r"202[0-9]", cand):
+                return cand
+    # 兜底：移除 URL、手机号与日期后再寻找独立 4~8 位数字
+    cleaned = re.sub(r"https?://\S+", " ", msg)
+    cleaned = re.sub(r"(?<![0-9])1[3-9][0-9]{9}(?![0-9])", " ", cleaned)
+    cleaned = re.sub(r"20[2-3][0-9][-/年.][0-1]?[0-9][-/月.][0-3]?[0-9]", " ", cleaned)
+    for m in re.finditer(r"(?<![0-9.])([0-9]{4,8})(?![0-9]|\.[0-9])", cleaned):
+        cand = m.group(1)
+        if not re.fullmatch(r"202[0-9]", cand):
+            return cand
+    return ""
+
+def _load_json_dict(path, default=None):
+    if default is None:
+        default = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                obj = json.load(f)
+            if isinstance(obj, dict):
+                return obj
+        except Exception:
+            pass
+    return dict(default)
+
+def load_sim_cards_db():
+    return _load_json_dict(SIM_CARDS_FILE, {"cards": {}})
+
+def save_sim_cards_db(db):
+    if not isinstance(db, dict):
+        db = {"cards": {}}
+    if not isinstance(db.get("cards"), dict):
+        db["cards"] = {}
+    _atomic_write_text(SIM_CARDS_FILE, json.dumps(db, ensure_ascii=False, indent=2), mode=0o600)
+
+def load_sim_slot_cache():
+    return _load_json_dict(SIM_SLOT_CACHE_FILE, {"0": {}, "1": {}})
+
+def save_sim_slot_cache(cache_obj):
+    _atomic_write_text(SIM_SLOT_CACHE_FILE, json.dumps(cache_obj, ensure_ascii=False, indent=2), mode=0o600)
+
+def _bcd_swap_decode(hex_str):
+    h = re.sub(r"[^0-9A-Fa-f]", "", str(hex_str or "")).upper()
+    out = []
+    for i in range(0, len(h) - 1, 2):
+        b = h[i:i + 2]
+        out.append(b[1] + b[0])
+    return "".join(out).rstrip("F")
+
+def _classify_uicc_aid(aid_hex):
+    a = str(aid_hex or "").upper()
+    if a.startswith("A0000005591010"):
+        return "ISD-R(eUICC)"
+    if a.startswith("A0000000871002"):
+        return "USIM"
+    if a.startswith("A0000000871004"):
+        return "ISIM"
+    return "UICC"
+
+def _parse_ef_dir_aids(hex_payload):
+    """解析 EF_DIR (2F00) TLV 中的 4F <len> <AID> 应用标识符列表，返回 (aid_items, is_euicc)"""
+    chunks = hex_payload if isinstance(hex_payload, (list, tuple)) else [hex_payload]
+    seen_hex = set()
+    aid_items = []
+    is_euicc = False
+    for item in chunks:
+        h = re.sub(r"[^0-9A-Fa-f]", "", str(item or "")).upper()
+        idx = 0
+        while idx + 4 <= len(h):
+            pos = h.find("4F", idx)
+            if pos < 0 or (pos % 2 != 0):
+                idx = (pos + 1) if pos >= 0 else len(h)
+                continue
+            if pos + 4 > len(h):
+                break
+            ln = int(h[pos + 2:pos + 4], 16)
+            end = pos + 4 + ln * 2
+            if 5 <= ln <= 16 and end <= len(h):
+                aid = h[pos + 4:end]
+                if aid.startswith("A000000") and aid not in seen_hex:
+                    seen_hex.add(aid)
+                    atype = _classify_uicc_aid(aid)
+                    if atype == "ISD-R(eUICC)":
+                        is_euicc = True
+                    aid_items.append({"aid": aid, "type": atype})
+                idx = end
+            else:
+                idx = pos + 2
+    return aid_items, is_euicc
+
+def _slot_broker_pipe(slot_idx):
+    return "/run/mu300-at4/cmd" if int(slot_idx) == 1 else "/run/mu300-at/cmd"
+
+def _slot_at(slot_idx, cmd, timeout=4, lock_wait=6):
+    """向指定卡槽的独立 AT 守护管道发送单条命令 (卡1: /run/mu300-at, 卡2: /run/mu300-at4)"""
+    idx = 1 if int(slot_idx) == 1 else 0
+    if os.path.exists("/run/mu300/sim-switching"):
+        return False, "SIM_SWITCHING_BUSY"
+    pipe_path = _slot_broker_pipe(idx)
+    if not os.path.exists(pipe_path):
+        return False, f"BROKER_NOT_READY:{pipe_path}"
+    at_bin = "/opt/mu300/bin/mu300-at"
+    if not os.path.exists(at_bin):
+        return False, "MU300_AT_MISSING"
+    lk = AT_SLOT_LOCKS[idx]
+    if not lk.acquire(timeout=max(1.5, float(lock_wait))):
+        return False, "AT_LOCK_BUSY"
+    try:
+        at_dir = "/run/mu300-at4" if idx == 1 else "/run/mu300-at"
+        env = dict(
+            os.environ,
+            MU300_AT_DIR=at_dir,
+            MU300_SIM_SLOT=str(idx),
+            MU300_AT_LOCK_WAIT=str(int(lock_wait)),
+        )
+        proc = subprocess.run(
+            [at_bin, "-t", str(max(1, min(30, int(timeout)))), cmd],
+            capture_output=True,
+            text=True,
+            timeout=max(4, int(timeout) + int(lock_wait) + 4),
+            env=env,
+        )
+        out = ((proc.stdout or "") + "\n" + (proc.stderr or "")).replace("\r", "").strip()
+        return proc.returncode == 0, out
+    except Exception as e:
+        return False, str(e)
+    finally:
+        lk.release()
+
+def ensure_dual_sim_brokers_ready(save_hot=True):
+    """在已启动的 Ubuntu U30 Air 上无损拉起 mu300-atd4/atd5 双卡通道（零重启、不断流）"""
+    prep_bin = "/opt/mu300/bin/mu300-sim-boot-prep"
+    if not os.path.exists(prep_bin):
+        return False, "mu300-sim-boot-prep 未安装"
+    args = [prep_bin, "enable-live"]
+    if not save_hot:
+        args.append("--no-save")
+    try:
+        proc = subprocess.run(args, capture_output=True, text=True, timeout=30)
+        out = (proc.stdout or proc.stderr or "").strip()
+        return proc.returncode == 0, out
+    except Exception as e:
+        return False, str(e)
+
+def probe_sim_slot(slot_num, power_sim=False, check_euicc=True):
+    """
+    无损检测指定卡槽 (1 或 2) 的 8 脚物理触点、CPIN 鉴权、ICCID、运营商及 eUICC (9eSIM/ESTK/5ber ISD-R) 能力。
+    - 当检测非活动卡槽时，全程仅操作该卡独立 AT 通道 (不切射频、不断当前卡 1 的 5G 网络与 Tailscale)。
+    """
+    s_num = 2 if int(slot_num) == 2 else 1
+    idx = s_num - 1
+    active_idx = get_active_sim_slot_idx()
+    is_active = (idx == active_idx)
+    checks = []
+
+    # 1. 检查 AT 通道守护进程
+    pipe_path = _slot_broker_pipe(idx)
+    if not os.path.exists(pipe_path) and idx == 1 and power_sim:
+        ensure_dual_sim_brokers_ready(save_hot=True)
+    broker_ok = os.path.exists(pipe_path)
+    checks.append({
+        "step": "broker",
+        "title": "AT 独立通道守护",
+        "ok": broker_ok,
+        "detail": f"{pipe_path} 在线" if broker_ok else f"{pipe_path} 未就绪（可点击开启双卡热备自动拉起）",
+    })
+    if not broker_ok:
+        return {
+            "ok": 0,
+            "slot": s_num,
+            "active": is_active,
+            "pin_ok": False,
+            "cpin": "BROKER_DOWN",
+            "checks": checks,
+            "summary": f"SIM {s_num} 独立 AT 守护通道尚未就绪",
+        }
+
+    # 2. 读取当前射频/功能栈状态 CFUN
+    ok_cfun, out_cfun = _slot_at(idx, "AT+CFUN?", timeout=4)
+    m_cfun = re.search(r"\+CFUN:\s*(\d+)", out_cfun)
+    cfun_val = int(m_cfun.group(1)) if m_cfun else None
+    checks.append({
+        "step": "cfun",
+        "title": "基带协议栈响应",
+        "ok": bool(ok_cfun and cfun_val is not None),
+        "detail": f"CFUN={cfun_val} ({'主用全功能射频' if cfun_val == 1 else ('仅 SIM 接口上电' if cfun_val == 2 else '待机零射频')})" if cfun_val is not None else (out_cfun[:80] or "无响应"),
+    })
+
+    # 3. 读取 SIM 触点状态 CPIN (若为待机副卡且 CFUN=0 未给卡槽供电，按需发送 AT+SFUN=2 单独给 SIM 触点上电，不影响主卡上网)
+    ok_cpin, out_cpin = _slot_at(idx, "AT+CPIN?", timeout=4)
+    cpin_state = "UNKNOWN"
+    if "+CPIN: READY" in out_cpin:
+        cpin_state = "READY"
+    elif re.search(r"\+CPIN:\s*(SIM PIN|SIM PUK)", out_cpin):
+        cpin_state = "LOCKED"
+    elif re.search(r"(\+CME ERROR:\s*(10|13)|NOT INSERTED)", out_cpin, re.IGNORECASE):
+        cpin_state = "ABSENT"
+
+    powered_up_sim = False
+    if cpin_state != "READY" and (not is_active) and power_sim:
+        _slot_at(idx, "AT+SFUN=2", timeout=10, lock_wait=8)
+        time.sleep(1.2)
+        powered_up_sim = True
+        ok_cpin, out_cpin = _slot_at(idx, "AT+CPIN?", timeout=4)
+        if "+CPIN: READY" in out_cpin:
+            cpin_state = "READY"
+        elif re.search(r"\+CPIN:\s*(SIM PIN|SIM PUK)", out_cpin):
+            cpin_state = "LOCKED"
+        elif re.search(r"(\+CME ERROR:\s*(10|13)|NOT INSERTED)", out_cpin, re.IGNORECASE):
+            cpin_state = "ABSENT"
+
+    pin_ok = cpin_state in ("READY", "LOCKED")
+    checks.append({
+        "step": "cpin",
+        "title": "8 脚卡槽触点 (VCC/RST/CLK/IO)",
+        "ok": pin_ok,
+        "detail": (
+            f"触点导通正常 (+CPIN: {cpin_state})" + (" [已独立上电检测，主卡不断网]" if powered_up_sim else "")
+            if pin_ok else f"未检测到有效卡片响应 ({out_cpin.splitlines()[-1] if out_cpin else '无应答'}) — 改装后请检查 VCC/RST/CLK/IO 焊点与卡托方向"
+        ),
+    })
+
+    iccid = ""
+    imsi = ""
+    aids = []
+    is_euicc = False
+
+    if cpin_state == "READY":
+        # 4. 读取 ICCID (优先 AT+CCID，兜底 CRSM EF_ICCID 2FE2)
+        _, out_ccid = _slot_at(idx, "AT+CCID", timeout=4)
+        m_ccid = re.search(r"\+CCID:\s*([0-9A-Fa-f]{15,22})", out_ccid)
+        if not m_ccid:
+            m_ccid = re.search(r"(?<![0-9A-Fa-f])(89[0-9A-Fa-f]{16,20})(?![0-9A-Fa-f])", out_ccid)
+        if m_ccid:
+            iccid = m_ccid.group(1).upper().rstrip("F")
+        if not iccid:
+            _, out_crsm_iccid = _slot_at(idx, "AT+CRSM=176,12258,0,0,10", timeout=4)
+            m_hex = re.search(r'\+CRSM:\s*144,\s*0,\s*"?([0-9A-Fa-f]{16,20})"?', out_crsm_iccid)
+            if m_hex:
+                iccid = _bcd_swap_decode(m_hex.group(1))
+
+        # 5. 读取 IMSI
+        _, out_cimi = _slot_at(idx, "AT+CIMI", timeout=4)
+        m_imsi = re.search(r"(?<![0-9])([0-9]{14,15})(?![0-9])", out_cimi)
+        if m_imsi:
+            imsi = m_imsi.group(1)
+
+        checks.append({
+            "step": "identity",
+            "title": "卡片身份标识 (ICCID / IMSI)",
+            "ok": bool(iccid),
+            "detail": f"ICCID: {mask_iccid(iccid)} · IMSI: {mask_imsi(imsi) or '--'}" if iccid else "未能读出 EF_ICCID",
+        })
+
+        # 6. 读取 EF_DIR 应用目录与 ISD-R (eUICC 转接卡识别：9eSIM / ESTK / 5ber)
+        raw_dir_recs = []
+        for rec_no in (1, 2, 3, 4):
+            _, out_dir = _slot_at(idx, f"AT+CRSM=178,12032,{rec_no},4,0", timeout=4)
+            m_dir = re.search(r'\+CRSM:\s*144,\s*0,\s*"?([0-9A-Fa-f]+)"?', out_dir)
+            if m_dir:
+                raw_dir_recs.append(m_dir.group(1))
+        aids, dir_euicc = _parse_ef_dir_aids(raw_dir_recs)
+        if dir_euicc:
+            is_euicc = True
+
+        if check_euicc and not is_euicc:
+            seen_aid_set = {a["aid"] for a in aids if isinstance(a, dict)}
+            for isdr_aid in EUICC_ISDR_AIDS:
+                _, out_ccho = _slot_at(idx, f'AT+CCHO="{isdr_aid}"', timeout=5)
+                m_ch = re.search(r"\+CCHO:\s*(\d+)", out_ccho)
+                if m_ch:
+                    ch_id = m_ch.group(1)
+                    is_euicc = True
+                    if isdr_aid not in seen_aid_set:
+                        aids.append({"aid": isdr_aid, "type": "ISD-R(eUICC)"})
+                    _slot_at(idx, f"AT+CCHC={ch_id}", timeout=4)
+                    break
+
+        first_aid_str = (aids[0]["aid"][:16] + "...") if aids else ""
+        checks.append({
+            "step": "euicc",
+            "title": "USIM / eUICC (ISD-R) 应用能力",
+            "ok": True,
+            "detail": (
+                "检测到 GSMA ISD-R 通道！支持 9eSIM / ESTK / 5ber 实体 eSIM 管理"
+                if is_euicc else f"标准实体 USIM 卡 (AID: {first_aid_str})" if first_aid_str else "标准 SIM/USIM 卡"
+            ),
+        })
+
+    carrier = guess_carrier_from_ids(iccid, imsi)
+    cache_obj = load_sim_slot_cache()
+    prev_slot_cache = cache_obj.get(str(idx), {}) if isinstance(cache_obj.get(str(idx)), dict) else {}
+    slot_record = {
+        "cpin": cpin_state,
+        "cfun": cfun_val,
+        "iccid": iccid or (prev_slot_cache.get("iccid", "") if cpin_state == "UNKNOWN" else ""),
+        "imsi_masked": mask_imsi(imsi) if imsi else prev_slot_cache.get("imsi_masked", ""),
+        "imsi_plmn": imsi[:5] if len(imsi) >= 5 else prev_slot_cache.get("imsi_plmn", ""),
+        "carrier": carrier or prev_slot_cache.get("carrier", ""),
+        "is_euicc": bool(is_euicc),
+        "aids": aids,
+        "probed_at": int(time.time()),
+    }
+    cache_obj[str(idx)] = slot_record
+    save_sim_slot_cache(cache_obj)
+
+    if is_active and iccid:
+        sync_iccid_traffic_ledger(iccid, idx)
+
+    contact_ok = bool((cpin_state == "READY" and iccid) or cpin_state == "LOCKED")
+    return {
+        "ok": 1,
+        "slot": s_num,
+        "active": is_active,
+        "pin_ok": pin_ok,
+        "contact_ok": contact_ok,
+        "cpin": cpin_state,
+        "cfun": cfun_val,
+        "iccid": iccid,
+        "iccid_masked": mask_iccid(iccid),
+        "imsi_masked": mask_imsi(imsi),
+        "carrier": slot_record["carrier"],
+        "is_euicc": bool(is_euicc),
+        "aids": aids,
+        "checks": checks,
+        "summary": (
+            f"SIM {s_num} 触点与鉴权全部正常 ({slot_record['carrier'] or '已识别'} · {mask_iccid(iccid)})"
+            if cpin_state == "READY" and iccid
+            else (f"SIM {s_num} 触点导通，但开启了 PIN 锁" if cpin_state == "LOCKED" else f"SIM {s_num} 未检测到卡片 ({cpin_state})")
+        ),
+    }
+
+# -------------------------------------------------------------------------
+# 按 ICCID 独立隔离的流量账本与套餐策略 (自动随切卡/换卡无缝切换)
+# -------------------------------------------------------------------------
+def get_traffic_store_dir():
+    for d in ("/mnt/mu300-disk", ""):
+        cand = f"{d}/.mu300/traffic" if d else "/.mu300/traffic"
+        if os.path.isdir(f"{d}/.mu300" if d else "/.mu300"):
+            return cand
+    return "/etc/mu300/traffic"
+
+def _parse_kv_file(path):
+    res = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    s = line.strip()
+                    if not s or s.startswith("#") or "=" not in s:
+                        continue
+                    k, v = s.split("=", 1)
+                    res[k.strip()] = v.strip().strip("'\"")
+        except Exception:
+            pass
+    return res
+
+def _cycle_start_ymd(reset_day):
+    import calendar
+    import datetime
+    today = datetime.date.today()
+    rd = max(1, min(31, int(reset_day or 1)))
+    max_this = calendar.monthrange(today.year, today.month)[1]
+    eff_this = min(rd, max_this)
+    if today.day >= eff_this:
+        return datetime.date(today.year, today.month, eff_this).strftime("%Y-%m-%d")
+    if today.month == 1:
+        py, pm = today.year - 1, 12
+    else:
+        py, pm = today.year, today.month - 1
+    eff_prev = min(rd, calendar.monthrange(py, pm)[1])
+    return datetime.date(py, pm, eff_prev).strftime("%Y-%m-%d")
+
+def read_iccid_traffic_summary(iccid, is_active=False, force=False):
+    """读取指定 ICCID 的流量账本摘要（当前活动卡直接调 mu300-traffic 实时统计，非活动卡从归档账本零进程秒读）"""
+    if is_active:
+        now = time.time()
+        if not force and TRAFFIC_API_CACHE["data"] and (now - TRAFFIC_API_CACHE["time"] < 4.0):
+            raw = TRAFFIC_API_CACHE["data"]
+        else:
+            raw = run_mu300_api("traffic.get")
+            if isinstance(raw, dict) and raw.get("ok"):
+                TRAFFIC_API_CACHE["time"] = now
+                TRAFFIC_API_CACHE["data"] = raw
+        t_obj = raw.get("traffic") if isinstance(raw, dict) and isinstance(raw.get("traffic"), dict) else {}
+        cyc = t_obj.get("cycle") if isinstance(t_obj.get("cycle"), dict) else {}
+        tdy = t_obj.get("today") if isinstance(t_obj.get("today"), dict) else {}
+        cap_obj = t_obj.get("cap") if isinstance(t_obj.get("cap"), dict) else {}
+        dly_obj = t_obj.get("daily") if isinstance(t_obj.get("daily"), dict) else {}
+        used_b = int(
+            cyc.get(
+                "used",
+                cyc.get(
+                    "counted",
+                    cyc.get("total", (int(cyc.get("rx", 0) or 0) + int(cyc.get("tx", 0) or 0))),
+                ),
+            )
+            or 0
+        )
+        today_b = int(
+            dly_obj.get(
+                "used",
+                tdy.get("total", (int(tdy.get("rx", 0) or 0) + int(tdy.get("tx", 0) or 0))),
+            )
+            or 0
+        )
+        cap_b = int(cap_obj.get("bytes", 0) or 0)
+        pct = round((used_b / cap_b) * 100.0, 1) if cap_b > 0 else 0.0
+        return {
+            "active": True,
+            "today_bytes": today_b,
+            "cycle_bytes": used_b,
+            "cap_bytes": cap_b,
+            "daily_cap_bytes": int(dly_obj.get("bytes", 0) or 0),
+            "pct": pct,
+            "used_pct": pct,
+            "warn_pct": int(cap_obj.get("warn", cap_obj.get("warn_pct", 90)) or 90),
+            "reset_day": int(t_obj.get("reset_day", 1) or 1),
+            "plan": str(t_obj.get("plan") or ""),
+            "device": str(t_obj.get("device") or ""),
+            "cut_active": bool(cap_obj.get("cut_active") or dly_obj.get("cut_active")),
+        }
+
+    clean_id = re.sub(r"[^0-9A-Fa-f]", "", str(iccid or "")).upper()
+    if not clean_id:
+        return {"active": False, "today_bytes": 0, "cycle_bytes": 0, "cap_bytes": 0, "daily_cap_bytes": 0, "pct": 0.0, "used_pct": 0.0, "warn_pct": 90, "reset_day": 1, "plan": ""}
+    arc_dir = os.path.join(get_traffic_store_dir(), "by-iccid", clean_id)
+    conf = _parse_kv_file(os.path.join(arc_dir, "conf"))
+    reset_day = int(conf.get("RESET_DAY", 1) or 1)
+    cap_b = int(conf.get("CAP", 0) or 0)
+    daily_b = int(conf.get("DAILY", 0) or 0)
+    warn_pct = int(conf.get("WARN", 90) or 90)
+    plan = str(conf.get("PLAN", "") or "")
+    start_ymd = _cycle_start_ymd(reset_day)
+    today_ymd = time.strftime("%Y-%m-%d")
+    cyc_total = 0
+    tdy_total = 0
+    ledger_p = os.path.join(arc_dir, "ledger")
+    if os.path.exists(ledger_p):
+        try:
+            with open(ledger_p, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    parts = line.strip().split()
+                    if len(parts) >= 4 and parts[0] in ("day", "d"):
+                        d_str = parts[1]
+                        rx_b, tx_b = int(parts[2]), int(parts[3])
+                        if d_str >= start_ymd:
+                            cyc_total += (rx_b + tx_b)
+                        if d_str == today_ymd:
+                            tdy_total += (rx_b + tx_b)
+                    elif len(parts) >= 4 and parts[0] == "pending":
+                        cyc_total += (int(parts[2]) + int(parts[3]))
+                        tdy_total += (int(parts[2]) + int(parts[3]))
+        except Exception:
+            pass
+    pct = round((cyc_total / cap_b) * 100.0, 1) if cap_b > 0 else 0.0
+    return {
+        "active": False,
+        "today_bytes": tdy_total,
+        "cycle_bytes": cyc_total,
+        "cap_bytes": cap_b,
+        "daily_cap_bytes": daily_b,
+        "pct": pct,
+        "used_pct": pct,
+        "warn_pct": warn_pct,
+        "reset_day": reset_day,
+        "plan": plan,
+        "device": conf.get("DEVICE", ""),
+        "cut_active": False,
+    }
+
+def _build_traffic_conf_from_card_profile(card_prof, device_name):
+    lines = []
+    rd = max(1, min(31, int(card_prof.get("reset_day", 1) or 1)))
+    cap_gb = float(card_prof.get("cap_gb", 0) or 0)
+    daily_gb = float(card_prof.get("daily_gb", 0) or 0)
+    warn_pct = max(1, min(100, int(card_prof.get("warn_pct", 90) or 90)))
+    action = str(card_prof.get("over_limit_action", "none") or "none")
+    cut = 1 if action == "cut_data" else 0
+    plan = re.sub(r"[\r\n\t]", " ", str(card_prof.get("nickname", "") or "")).strip()[:64]
+    lines.append(f"RESET_DAY={rd}")
+    lines.append(f"CAP={int(round(cap_gb * 1073741824)) if cap_gb > 0 else 0}")
+    lines.append(f"WARN={warn_pct}")
+    lines.append(f"CUT={cut}")
+    lines.append(f"DAILY={int(round(daily_gb * 1073741824)) if daily_gb > 0 else 0}")
+    lines.append(f"DAILY_CUT={cut}")
+    lines.append("COUNT=total")
+    lines.append(f"PLAN={plan}")
+    lines.append(f"DEVICE={device_name}")
+    return "\n".join(lines) + "\n"
+
+def sync_iccid_traffic_ledger(active_iccid, slot_idx=None):
+    """
+    当检测到活动 SIM 卡的 ICCID 或卡槽变化时：
+    1. 将原卡账本归档至 .mu300/traffic/by-iccid/<old_iccid>/
+    2. 恢复新卡专属账本（首次升级自动继承原卡既有历史流量，新换上的副卡使用干净独立账本）
+    3. 自动同步统计网卡 DEVICE=sipa_eth0 (SIM1) 或 sipa_eth8 (SIM2)
+    """
+    clean_id = re.sub(r"[^0-9A-Fa-f]", "", str(active_iccid or "")).upper()
+    if len(clean_id) < 15:
+        return False
+    idx = get_active_sim_slot_idx() if slot_idx is None else int(slot_idx)
+    target_dev = "sipa_eth8" if idx == 1 else "sipa_eth0"
+    store = get_traffic_store_dir()
+    by_dir = os.path.join(store, "by-iccid")
+    active_marker = os.path.join(store, "active-iccid")
+    tr_bin = "/opt/mu300/bin/mu300-traffic"
+
+    with TRAFFIC_SWAP_LOCK:
+        os.makedirs(by_dir, exist_ok=True)
+        prev_id = ""
+        if os.path.exists(active_marker):
+            try:
+                with open(active_marker, "r", encoding="utf-8", errors="ignore") as f:
+                    prev_id = re.sub(r"[^0-9A-Fa-f]", "", f.read()).upper()
+            except Exception:
+                prev_id = ""
+
+        conf_path = os.path.join(store, "conf")
+        ledger_path = os.path.join(store, "ledger")
+
+        if not prev_id:
+            # 首次接管当前主卡：零损保留当前账本，建立当前 ICCID 绑定并确保 DEVICE 对齐
+            cur_dir = os.path.join(by_dir, clean_id)
+            os.makedirs(cur_dir, exist_ok=True)
+            for fn in ("conf", "ledger"):
+                src_p = os.path.join(store, fn)
+                if os.path.exists(src_p):
+                    try:
+                        with open(src_p, "r", encoding="utf-8", errors="ignore") as sf:
+                            _atomic_write_text(os.path.join(cur_dir, fn), sf.read(), mode=0o644)
+                    except Exception:
+                        pass
+            _atomic_write_text(active_marker, clean_id + "\n", mode=0o644)
+            cur_conf = _parse_kv_file(conf_path)
+            if cur_conf.get("DEVICE", "sipa_eth0") != target_dev and os.path.exists(tr_bin):
+                subprocess.run([tr_bin, "set", "device", target_dev], capture_output=True, timeout=6)
+                TRAFFIC_API_CACHE["time"] = 0
+            return True
+
+        if prev_id == clean_id:
+            cur_conf = _parse_kv_file(conf_path)
+            if cur_conf.get("DEVICE", "sipa_eth0") != target_dev and os.path.exists(tr_bin):
+                subprocess.run([tr_bin, "set", "device", target_dev], capture_output=True, timeout=6)
+                TRAFFIC_API_CACHE["time"] = 0
+            return True
+
+        # ICCID 发生切换：落盘并归档旧卡 -> 装载新卡独立账本 -> 切换统计网卡
+        if os.path.exists(tr_bin):
+            subprocess.run([tr_bin, "save"], capture_output=True, timeout=8)
+        subprocess.run(["systemctl", "stop", "mu300-traffic.service"], capture_output=True, timeout=8)
+        try:
+            old_dir = os.path.join(by_dir, prev_id)
+            os.makedirs(old_dir, exist_ok=True)
+            for fn in ("conf", "ledger"):
+                src_p = os.path.join(store, fn)
+                if os.path.exists(src_p):
+                    with open(src_p, "r", encoding="utf-8", errors="ignore") as sf:
+                        _atomic_write_text(os.path.join(old_dir, fn), sf.read(), mode=0o644)
+
+            new_dir = os.path.join(by_dir, clean_id)
+            os.makedirs(new_dir, exist_ok=True)
+            new_conf_p = os.path.join(new_dir, "conf")
+            new_ledger_p = os.path.join(new_dir, "ledger")
+
+            cards_db = load_sim_cards_db().get("cards", {})
+            card_prof = cards_db.get(clean_id, {}) if isinstance(cards_db.get(clean_id), dict) else {}
+
+            if os.path.exists(new_conf_p):
+                with open(new_conf_p, "r", encoding="utf-8", errors="ignore") as nf:
+                    raw_c = nf.read()
+                if re.search(r"(?m)^DEVICE=", raw_c):
+                    raw_c = re.sub(r"(?m)^DEVICE=.*$", f"DEVICE={target_dev}", raw_c)
+                else:
+                    raw_c = raw_c.rstrip("\n") + f"\nDEVICE={target_dev}\n"
+                _atomic_write_text(conf_path, raw_c, mode=0o644)
+            else:
+                _atomic_write_text(conf_path, _build_traffic_conf_from_card_profile(card_prof, target_dev), mode=0o644)
+
+            if os.path.exists(new_ledger_p):
+                with open(new_ledger_p, "r", encoding="utf-8", errors="ignore") as lf:
+                    _atomic_write_text(ledger_path, lf.read(), mode=0o644)
+            else:
+                _atomic_write_text(ledger_path, "v 1\n", mode=0o644)
+
+            for run_f in ("/run/mu300/traffic/ledger", "/run/mu300/traffic/summary"):
+                if os.path.exists(run_f):
+                    try:
+                        os.remove(run_f)
+                    except OSError:
+                        pass
+
+            _atomic_write_text(active_marker, clean_id + "\n", mode=0o644)
+        finally:
+            subprocess.run(["systemctl", "start", "mu300-traffic.service"], capture_output=True, timeout=8)
+            TRAFFIC_API_CACHE["time"] = 0
+        return True
+
+def save_sim_card_profile(req_data):
+    """保存单张 SIM 卡 (按 ICCID 绑定) 的昵称、手机号、备注、账单日、流量上限与超额自动切卡策略"""
+    iccid = re.sub(r"[^0-9A-Fa-f]", "", str(req_data.get("iccid", "") or "")).upper()
+    slot_hint = req_data.get("slot")
+    if len(iccid) < 15 and slot_hint in (1, 2, "1", "2"):
+        slot_cache = load_sim_slot_cache().get(str(int(slot_hint) - 1), {})
+        iccid = re.sub(r"[^0-9A-Fa-f]", "", str(slot_cache.get("iccid", "") or "")).upper()
+    if len(iccid) < 15:
+        return {"ok": 0, "error": "请先点击「检测卡槽触点」读取有效 ICCID 后再保存卡片档案"}
+
+    db = load_sim_cards_db()
+    cards = db.setdefault("cards", {})
+    cur = dict(cards.get(iccid) or {})
+    if "nickname" in req_data:
+        cur["nickname"] = str(req_data.get("nickname") or "").strip()[:40]
+    if "phone" in req_data:
+        cur["phone"] = re.sub(r"[^0-9+\- ]", "", str(req_data.get("phone") or ""))[:24]
+    if "carrier_custom" in req_data:
+        cur["carrier_custom"] = str(req_data.get("carrier_custom") or "").strip()[:32]
+    if "notes" in req_data:
+        cur["notes"] = str(req_data.get("notes") or "").strip()[:120]
+    if "reset_day" in req_data:
+        cur["reset_day"] = max(1, min(31, int(req_data.get("reset_day") or 1)))
+    if "cap_gb" in req_data:
+        cur["cap_gb"] = max(0.0, round(float(req_data.get("cap_gb") or 0), 2))
+    if "daily_gb" in req_data:
+        cur["daily_gb"] = max(0.0, round(float(req_data.get("daily_gb") or 0), 2))
+    if "warn_pct" in req_data:
+        cur["warn_pct"] = max(1, min(100, int(req_data.get("warn_pct") or 90)))
+    if "over_limit_action" in req_data:
+        act = str(req_data.get("over_limit_action") or "none")
+        if act in ("none", "cut_data", "switch_sim"):
+            cur["over_limit_action"] = act
+    cur["updated_at"] = int(time.time())
+    cards[iccid] = cur
+    save_sim_cards_db(db)
+
+    # 若该 ICCID 正是当前主用上网卡，立即同步至 mu300-traffic；否则同步至其归档账本配置
+    active_idx = get_active_sim_slot_idx()
+    active_cache = load_sim_slot_cache().get(str(active_idx), {})
+    active_iccid = re.sub(r"[^0-9A-Fa-f]", "", str(active_cache.get("iccid", "") or "")).upper()
+    if active_iccid == iccid:
+        sync_iccid_traffic_ledger(iccid, active_idx)
+        cut_flag = "on" if cur.get("over_limit_action") == "cut_data" else "off"
+        kv_pairs = [
+            ("reset_day", int(cur.get("reset_day", 1) or 1)),
+            ("cap", str(int(round(float(cur.get("cap_gb", 0) or 0) * 1073741824)))),
+            ("daily", str(int(round(float(cur.get("daily_gb", 0) or 0) * 1073741824)))),
+            ("warn", int(cur.get("warn_pct", 90) or 90)),
+            ("cut", cut_flag),
+            ("daily_cut", cut_flag),
+            ("plan", str(cur.get("nickname", "") or "")),
+        ]
+        for k_name, v_val in kv_pairs:
+            run_mu300_api("traffic.set", {"key": k_name, "value": v_val})
+        arc_dir = os.path.join(get_traffic_store_dir(), "by-iccid", iccid)
+        os.makedirs(arc_dir, exist_ok=True)
+        conf_live = os.path.join(get_traffic_store_dir(), "conf")
+        if os.path.exists(conf_live):
+            with open(conf_live, "r", encoding="utf-8", errors="ignore") as cf:
+                _atomic_write_text(os.path.join(arc_dir, "conf"), cf.read(), mode=0o644)
+        TRAFFIC_API_CACHE["time"] = 0
+    else:
+        arc_dir = os.path.join(get_traffic_store_dir(), "by-iccid", iccid)
+        os.makedirs(arc_dir, exist_ok=True)
+        dev_guess = "sipa_eth8" if str(slot_hint) == "2" else "sipa_eth0"
+        _atomic_write_text(os.path.join(arc_dir, "conf"), _build_traffic_conf_from_card_profile(cur, dev_guess), mode=0o644)
+
+    return {"ok": 1, "iccid": iccid, "iccid_masked": mask_iccid(iccid), "profile": cur, "msg": "SIM 卡片档案与独立流量策略已保存"}
+
+def _read_slot_apn_conf(slot_idx):
+    p = "/etc/mu300/mobile-data-sim2.conf" if int(slot_idx) == 1 else "/etc/mu300/mobile-data.conf"
+    kv = _parse_kv_file(p)
+    roam_raw = str(kv.get("MU300_DATA_ROAMING", "1")).lower()
+    return {
+        "apn": kv.get("MU300_APN", ""),
+        "pdp": kv.get("MU300_PDP_TYPE", "IPV4V6") or "IPV4V6",
+        "auth": kv.get("MU300_APN_AUTH", "none") or "none",
+        "user": kv.get("MU300_APN_USER", ""),
+        "password_set": bool(kv.get("MU300_APN_PASSWORD")),
+        "roaming": roam_raw not in ("0", "off", "false", "no"),
+    }
+
+def _invalidate_cellular_caches():
+    CELLULAR_CACHE["time"] = 0
+    CELLULAR_CACHE["static_time"] = 0
+    CELLULAR_IP_CACHE["time"] = 0
+    PUBLIC_IP_CACHE["time"] = 0
+    PUBLIC_IP_CACHE["ip"] = ""
+    TRAFFIC_API_CACHE["time"] = 0
+    if "OVERVIEW_API_CACHE" in globals() and isinstance(globals()["OVERVIEW_API_CACHE"], dict):
+        globals()["OVERVIEW_API_CACHE"]["time"] = 0
+
+def get_sim_switch_status():
+    now = time.time()
+    with SIM_SWITCH_LOCK:
+        sw = dict(SIM_SWITCH_STATE)
+        fl = dict(FLASH_SWITCH_STATE)
+        fl["captured_sms"] = list(FLASH_SWITCH_STATE.get("captured_sms") or [])
+    if sw.get("running") and sw.get("started_at"):
+        sw["elapsed_s"] = round(max(0.0, now - sw["started_at"]), 1)
+    else:
+        sw["elapsed_s"] = round(max(0.0, (sw.get("finished_at") or 0) - (sw.get("started_at") or 0)), 1)
+    if fl.get("running") and fl.get("deadline"):
+        fl["remaining_s"] = max(0, int(round(fl["deadline"] - now)))
+    else:
+        fl["remaining_s"] = 0
+    return {"ok": 1, "active_slot": get_active_sim_slot_idx() + 1, "switch": sw, "flash": fl}
+
+def get_sim_overview(refresh_active=False):
+    """汇总双卡控制中心全量视图：热备状态、双卡触点/ICCID/eUICC、独立流量账本、APN、射频与 VoLTE/VoNR"""
+    sim_res = run_mu300_api("sim.get")
+    sim_info = sim_res.get("sim") if isinstance(sim_res, dict) and isinstance(sim_res.get("sim"), dict) else {}
+    radio_res = run_mu300_api("radio.get")
+    radio_info = radio_res.get("radio") if isinstance(radio_res, dict) and isinstance(radio_res.get("radio"), dict) else {}
+    voice_res = run_mu300_api("voice.get")
+    voice_info = voice_res.get("voice") if isinstance(voice_res, dict) and isinstance(voice_res.get("voice"), dict) else {}
+
+    active_idx = get_active_sim_slot_idx()
+    boot_slot = int(sim_info.get("default") or (active_idx + 1))
+
+    slot_cache = load_sim_slot_cache()
+    # 若当前活动卡尚未缓存 ICCID（或强制刷新），自动执行一次轻量读取并绑定独立流量账本
+    active_cached = slot_cache.get(str(active_idx), {}) if isinstance(slot_cache.get(str(active_idx)), dict) else {}
+    if (refresh_active or not active_cached.get("iccid")) and not os.path.exists("/run/mu300/sim-switching"):
+        probe_sim_slot(active_idx + 1, power_sim=False, check_euicc=not bool(active_cached.get("probed_at")))
+        slot_cache = load_sim_slot_cache()
+    elif active_cached.get("iccid"):
+        sync_iccid_traffic_ledger(active_cached["iccid"], active_idx)
+
+    cards_db = load_sim_cards_db().get("cards", {})
+    radio_enabled_arr = radio_info.get("enabled") if isinstance(radio_info.get("enabled"), list) and len(radio_info.get("enabled")) >= 2 else [True, True]
+    voice_slots = voice_info.get("slots") if isinstance(voice_info.get("slots"), list) else []
+
+    slots_out = []
+    for idx in (0, 1):
+        s_num = idx + 1
+        c_rec = slot_cache.get(str(idx), {}) if isinstance(slot_cache.get(str(idx)), dict) else {}
+        iccid = str(c_rec.get("iccid") or "")
+        prof = dict(cards_db.get(iccid) or {}) if iccid else {}
+        v_obj = voice_slots[idx] if idx < len(voice_slots) and isinstance(voice_slots[idx], dict) else {}
+        is_act = (idx == active_idx)
+        qos_oper = CELLULAR_CACHE["data"].get("operator_name", "") if is_act else ""
+        carrier = prof.get("carrier_custom") or c_rec.get("carrier") or (qos_oper if is_act else "") or guess_carrier_from_ids(iccid, c_rec.get("imsi_plmn", ""))
+        slots_out.append({
+            "slot": s_num,
+            "label": "外置 Nano 卡槽 (SIM 1)" if idx == 0 else "内置/改装小卡槽 (SIM 2)",
+            "iface": "sipa_eth0" if idx == 0 else "sipa_eth8",
+            "at_dir": "/run/mu300-at" if idx == 0 else "/run/mu300-at4",
+            "broker_up": os.path.exists(_slot_broker_pipe(idx)),
+            "active": is_act,
+            "boot_default": (boot_slot == s_num),
+            "radio_enabled": bool(radio_enabled_arr[idx]),
+            "cpin": c_rec.get("cpin") or ("READY" if is_act else "UNPROBED"),
+            "cfun": 1 if is_act else c_rec.get("cfun", 0),
+            "iccid": iccid,
+            "iccid_masked": mask_iccid(iccid),
+            "imsi_masked": c_rec.get("imsi_masked", ""),
+            "carrier": carrier,
+            "is_euicc": bool(c_rec.get("is_euicc")),
+            "aids": c_rec.get("aids") or [],
+            "probed_at": c_rec.get("probed_at") or 0,
+            "apn_conf": _read_slot_apn_conf(idx),
+            "volte": bool(v_obj.get("volte", True)),
+            "vonr": bool(v_obj.get("vonr", False)),
+            "profile": {
+                "nickname": prof.get("nickname", ""),
+                "phone": prof.get("phone", ""),
+                "carrier_custom": prof.get("carrier_custom", ""),
+                "notes": prof.get("notes", ""),
+                "reset_day": int(prof.get("reset_day", 1) or 1),
+                "cap_gb": float(prof.get("cap_gb", 0) or 0),
+                "daily_gb": float(prof.get("daily_gb", 0) or 0),
+                "warn_pct": int(prof.get("warn_pct", 90) or 90),
+                "over_limit_action": prof.get("over_limit_action", "none"),
+            },
+            "traffic": read_iccid_traffic_summary(iccid, is_active=is_act),
+        })
+
+    sw_status = get_sim_switch_status()
+    return {
+        "ok": 1,
+        "supported": bool(sim_info.get("supported", 1)),
+        "available": bool(sim_info.get("available", 0)),
+        "hot": bool(sim_info.get("hot", 0)),
+        "active_slot": active_idx + 1,
+        "boot_slot": boot_slot,
+        "airplane_mode": bool(radio_info.get("all_off", False)),
+        "wan_user_down": os.path.exists("/run/mu300/wan-user-down"),
+        "slots": slots_out,
+        "switch": sw_status["switch"],
+        "flash": sw_status["flash"],
+    }
+
+def start_live_sim_switch(target_slot, wan_wait=45, make_default=False, reason="manual"):
+    """异步执行 Ubuntu 双卡热切换 (SIM1 sipa_eth0 <-> SIM2 sipa_eth8)，目标卡拨号超时自动回滚原卡保底"""
+    t_slot = int(target_slot)
+    if t_slot not in (1, 2):
+        return {"ok": 0, "error": "无效的目标卡槽 (仅支持 1 或 2)"}
+    w_wait = max(15, min(120, int(wan_wait or 45)))
+    orig_slot = get_active_sim_slot_idx() + 1
+
+    with SIM_SWITCH_LOCK:
+        if SIM_SWITCH_STATE["running"] or FLASH_SWITCH_STATE["running"]:
+            return {"ok": 0, "error": "当前已有切卡或闪切接码任务正在执行，请稍候"}
+        SIM_SWITCH_STATE.update({
+            "running": True,
+            "phase": "preparing",
+            "from_slot": orig_slot,
+            "target_slot": t_slot,
+            "started_at": time.time(),
+            "finished_at": 0.0,
+            "ok": None,
+            "msg": f"正在准备切换至 SIM {t_slot} ...",
+            "error": "",
+            "reason": reason,
+        })
+
+    def _worker():
+        try:
+            ok_prep, prep_msg = ensure_dual_sim_brokers_ready(save_hot=True)
+            if not ok_prep:
+                with SIM_SWITCH_LOCK:
+                    SIM_SWITCH_STATE.update({
+                        "running": False,
+                        "phase": "failed",
+                        "finished_at": time.time(),
+                        "ok": 0,
+                        "error": f"双卡守护通道未就绪: {prep_msg}",
+                        "msg": "切卡前自检未通过，保持原卡在线",
+                    })
+                return
+
+            if os.path.exists("/opt/mu300/bin/mu300-traffic"):
+                subprocess.run(["/opt/mu300/bin/mu300-traffic", "save"], capture_output=True, timeout=8)
+
+            with SIM_SWITCH_LOCK:
+                SIM_SWITCH_STATE["phase"] = "switching"
+                SIM_SWITCH_STATE["msg"] = f"正在切换基带射频与数据路由至 SIM {t_slot}（若 {w_wait}s 内无法上网将自动回退至 SIM {orig_slot}）..."
+
+            env = dict(os.environ, MU300_SIM_WAN_WAIT=str(w_wait))
+            proc = subprocess.run(
+                ["/opt/mu300/bin/mu300-sim", "switch", str(t_slot)],
+                capture_output=True,
+                text=True,
+                timeout=w_wait + 95,
+                env=env,
+            )
+            out_txt = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+            _invalidate_cellular_caches()
+
+            if proc.returncode == 0:
+                if make_default:
+                    subprocess.run(["/opt/mu300/bin/mu300-sim", "default", str(t_slot)], capture_output=True, timeout=10)
+                probe_res = probe_sim_slot(t_slot, power_sim=False, check_euicc=False)
+                new_iccid = probe_res.get("iccid", "")
+                if new_iccid:
+                    sync_iccid_traffic_ledger(new_iccid, t_slot - 1)
+                update_public_ip_async()
+                with SIM_SWITCH_LOCK:
+                    SIM_SWITCH_STATE.update({
+                        "running": False,
+                        "phase": "done",
+                        "finished_at": time.time(),
+                        "ok": 1,
+                        "msg": f"已成功切换至 SIM {t_slot} ({'sipa_eth8' if t_slot == 2 else 'sipa_eth0'}) 提供蜂窝网络！",
+                        "error": "",
+                    })
+            else:
+                # 回退后重新对齐原卡账本与缓存
+                cur_slot = get_active_sim_slot_idx() + 1
+                probe_res = probe_sim_slot(cur_slot, power_sim=False, check_euicc=False)
+                if probe_res.get("iccid"):
+                    sync_iccid_traffic_ledger(probe_res["iccid"], cur_slot - 1)
+                update_public_ip_async()
+                last_err = out_txt.splitlines()[-1] if out_txt else "目标卡未就绪或未能获取数据承载 IP"
+                with SIM_SWITCH_LOCK:
+                    SIM_SWITCH_STATE.update({
+                        "running": False,
+                        "phase": "rolled_back",
+                        "finished_at": time.time(),
+                        "ok": 0,
+                        "msg": f"SIM {t_slot} 未能在 {w_wait}s 内建立数据连接，已安全自动回滚至 SIM {cur_slot}",
+                        "error": last_err,
+                    })
+        except Exception as e:
+            _invalidate_cellular_caches()
+            with SIM_SWITCH_LOCK:
+                SIM_SWITCH_STATE.update({
+                    "running": False,
+                    "phase": "failed",
+                    "finished_at": time.time(),
+                    "ok": 0,
+                    "msg": "切卡任务执行异常",
+                    "error": str(e),
+                })
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return {"ok": 1, "started": True, "target_slot": t_slot, "wan_wait": w_wait, "msg": f"已启动切换至 SIM {t_slot}"}
+
+# -------------------------------------------------------------------------
+# 短信 (含 OTP 提取与指定卡槽读取)、Bark / Telegram / Webhook 推送、来电与闪切接码
+# -------------------------------------------------------------------------
+def list_slot_sms(slot_num=None):
+    s_idx = get_active_sim_slot_idx() if slot_num is None else (1 if int(slot_num) == 2 else 0)
+    sms_bin = "/opt/mu300/bin/sms"
+    if not os.path.exists(sms_bin):
+        return {"ok": 0, "error": "sms 工具未安装", "messages": []}
+    if os.path.exists("/run/mu300/sim-switching"):
+        return {"ok": 1, "slot": s_idx + 1, "busy": True, "messages": []}
+    at_dir = "/run/mu300-at4" if (s_idx == 1 and os.path.exists("/run/mu300-at4/cmd")) else "/run/mu300-at"
+    env = dict(os.environ, MU300_SIM_SLOT=str(s_idx), MU300_AT_DIR=at_dir)
+    try:
+        proc = subprocess.run([sms_bin, "json"], capture_output=True, text=True, timeout=25, env=env)
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "读取短信失败").strip()
+            return {"ok": 0, "slot": s_idx + 1, "error": err, "messages": []}
+        parsed = json.loads(proc.stdout or "{}")
+        msgs = parsed.get("messages", []) if isinstance(parsed, dict) else (parsed if isinstance(parsed, list) else [])
+        if not isinstance(msgs, list):
+            msgs = []
+        enriched = []
+        for m in msgs:
+            if not isinstance(m, dict):
+                continue
+            item = dict(m)
+            idx_val = item.get("index")
+            if "id" not in item:
+                if isinstance(idx_val, list) and idx_val:
+                    item["id"] = idx_val[0]
+                elif idx_val is not None:
+                    item["id"] = idx_val
+            item["slot"] = s_idx + 1
+            item["otp_code"] = extract_sms_otp(item.get("text", ""))
+            enriched.append(item)
+        enriched.sort(key=lambda x: str(x.get("time", "")), reverse=True)
+        return {"ok": 1, "slot": s_idx + 1, "messages": enriched}
+    except Exception as e:
+        return {"ok": 0, "slot": s_idx + 1, "error": str(e), "messages": []}
+
+def load_comm_push_conf():
+    default_cfg = {
+        "enabled": False,
+        "bark_url": "",
+        "tg_bot_token": "",
+        "tg_chat_id": "",
+        "webhook_url": "",
+        "webhook_secret": "",
+        "push_sms": True,
+        "push_calls": True,
+        "auto_hangup_calls": False,
+    }
+    cfg = _load_json_dict(COMM_PUSH_CONF_FILE, default_cfg)
+    for k, v in default_cfg.items():
+        cfg.setdefault(k, v)
+    return cfg
+
+def get_comm_push_public_view():
+    cfg = load_comm_push_conf()
+    events = _load_json_dict(COMM_EVENTS_FILE, {"items": []}).get("items", [])
+    def _mask_secret_url(u):
+        s = str(u or "").strip()
+        if not s:
+            return ""
+        try:
+            p = urllib.parse.urlsplit(s)
+            path_s = p.path or ""
+            if len(path_s) > 10:
+                path_s = path_s[:6] + "••••" + path_s[-4:]
+            return f"{p.scheme}://{p.netloc}{path_s}"
+        except Exception:
+            return s[:12] + "••••"
+
+    tok = str(cfg.get("tg_bot_token") or "").strip()
+    tok_masked = (tok[:6] + "••••" + tok[-4:]) if len(tok) > 12 else ("••••" if tok else "")
+    return {
+        "ok": 1,
+        "config": {
+            "enabled": bool(cfg.get("enabled")),
+            "bark_configured": bool(cfg.get("bark_url")),
+            "bark_preview": _mask_secret_url(cfg.get("bark_url")),
+            "tg_configured": bool(tok and cfg.get("tg_chat_id")),
+            "tg_token_preview": tok_masked,
+            "tg_chat_id": str(cfg.get("tg_chat_id") or ""),
+            "webhook_configured": bool(cfg.get("webhook_url")),
+            "webhook_preview": _mask_secret_url(cfg.get("webhook_url")),
+            "webhook_secret_set": bool(cfg.get("webhook_secret")),
+            "push_sms": bool(cfg.get("push_sms", True)),
+            "push_calls": bool(cfg.get("push_calls", True)),
+            "auto_hangup_calls": bool(cfg.get("auto_hangup_calls", False)),
+        },
+        "events": events[:20] if isinstance(events, list) else [],
+    }
+
+def save_comm_push_conf(req_data):
+    cfg = load_comm_push_conf()
+    for bool_k in ("enabled", "push_sms", "push_calls", "auto_hangup_calls"):
+        if bool_k in req_data:
+            cfg[bool_k] = bool(req_data[bool_k])
+    if "bark_url" in req_data:
+        v = str(req_data["bark_url"] or "").strip()
+        if v == "" or v.startswith(("http://", "https://")):
+            cfg["bark_url"] = v
+        else:
+            return {"ok": 0, "error": "Bark 地址需以 http:// 或 https:// 开头（例如 https://api.day.app/您的Key）"}
+    if "tg_bot_token" in req_data:
+        v = str(req_data["tg_bot_token"] or "").strip()
+        if "••••" not in v:
+            cfg["tg_bot_token"] = v
+    if "tg_chat_id" in req_data:
+        cfg["tg_chat_id"] = str(req_data["tg_chat_id"] or "").strip()[:48]
+    if "webhook_url" in req_data:
+        v = str(req_data["webhook_url"] or "").strip()
+        if v == "" or v.startswith(("http://", "https://")):
+            cfg["webhook_url"] = v
+        else:
+            return {"ok": 0, "error": "Webhook 地址需以 http:// 或 https:// 开头"}
+    if "webhook_secret" in req_data:
+        v = str(req_data["webhook_secret"] or "").strip()
+        if v != "••••":
+            cfg["webhook_secret"] = v[:128]
+    if req_data.get("clear_bark"):
+        cfg["bark_url"] = ""
+    if req_data.get("clear_tg"):
+        cfg["tg_bot_token"] = ""
+        cfg["tg_chat_id"] = ""
+    if req_data.get("clear_webhook"):
+        cfg["webhook_url"] = ""
+        cfg["webhook_secret"] = ""
+    _atomic_write_text(COMM_PUSH_CONF_FILE, json.dumps(cfg, ensure_ascii=False, indent=2), mode=0o600)
+    res = get_comm_push_public_view()
+    res["msg"] = "通知推送与来电规则已保存"
+    return res
+
+def record_comm_event(kind, title, detail, ok=True):
+    os.makedirs("/run/mu300", exist_ok=True)
+    cur = _load_json_dict(COMM_EVENTS_FILE, {"items": []})
+    items = cur.get("items") if isinstance(cur.get("items"), list) else []
+    items.insert(0, {
+        "time": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "kind": kind,
+        "title": str(title)[:80],
+        "detail": str(detail)[:160],
+        "ok": bool(ok),
+    })
+    cur["items"] = items[:30]
+    _atomic_write_text(COMM_EVENTS_FILE, json.dumps(cur, ensure_ascii=False), mode=0o600)
+
+def _post_json_url(url, payload, headers=None, timeout=8):
+    hdrs = {"Content-Type": "application/json; charset=utf-8", "User-Agent": "U30Air-WebUI/1.0"}
+    if headers:
+        hdrs.update(headers)
+    data = json.dumps(payload, ensure_ascii=False).encode("utf-8")
+    req = urllib.request.Request(url, data=data, headers=hdrs, method="POST")
+    ctx = ssl.create_default_context()
+    with urllib.request.urlopen(req, timeout=timeout, context=ctx) as resp:
+        return resp.status, resp.read(4096).decode("utf-8", errors="ignore")
+
+def dispatch_comm_push(title, body, category="sms", otp_code="", meta=None, force=False):
+    """向已配置的 Bark / Telegram Bot / 自定义 Webhook 并发投递短信、验证码、来电或切卡告警"""
+    cfg = load_comm_push_conf()
+    if not force and not cfg.get("enabled"):
+        return {"ok": 0, "skipped": True, "error": "推送总开关未启用"}
+
+    results = []
+    bark_url = str(cfg.get("bark_url") or "").strip().rstrip("/")
+    if bark_url:
+        try:
+            # 兼容 https://api.day.app/<device_key> 与直接传入 /push 端点
+            p = urllib.parse.urlsplit(bark_url)
+            segs = [x for x in (p.path or "").split("/") if x]
+            if segs and segs[-1] == "push":
+                target_u = bark_url
+                b_payload = {"title": title, "body": body, "group": "U30Air"}
+            elif segs:
+                dev_key = segs[-1]
+                base_path = "/" + "/".join(segs[:-1]) if len(segs) > 1 else ""
+                target_u = f"{p.scheme}://{p.netloc}{base_path}/push"
+                b_payload = {"device_key": dev_key, "title": title, "body": body, "group": "U30Air"}
+            else:
+                target_u = bark_url + "/push"
+                b_payload = {"title": title, "body": body, "group": "U30Air"}
+            if otp_code:
+                b_payload["copy"] = otp_code
+                b_payload["autoCopy"] = "1"
+            code, _ = _post_json_url(target_u, b_payload, timeout=8)
+            results.append(("Bark", 200 <= code < 300, f"HTTP {code}"))
+        except Exception as e:
+            results.append(("Bark", False, str(e)[:80]))
+
+    tg_tok = str(cfg.get("tg_bot_token") or "").strip()
+    tg_chat = str(cfg.get("tg_chat_id") or "").strip()
+    if tg_tok and tg_chat:
+        try:
+            tg_u = f"https://api.telegram.org/bot{tg_tok}/sendMessage"
+            tg_text = f"📡 {title}\n\n{body}" + (f"\n\n🔑 验证码: {otp_code}" if otp_code else "")
+            code, _ = _post_json_url(tg_u, {"chat_id": tg_chat, "text": tg_text}, timeout=8)
+            results.append(("Telegram", 200 <= code < 300, f"HTTP {code}"))
+        except Exception as e:
+            results.append(("Telegram", False, str(e)[:80]))
+
+    wh_url = str(cfg.get("webhook_url") or "").strip()
+    if wh_url:
+        try:
+            wh_hdrs = {}
+            if cfg.get("webhook_secret"):
+                wh_hdrs["X-Webhook-Secret"] = str(cfg["webhook_secret"])
+            wh_payload = {
+                "event": category,
+                "title": title,
+                "body": body,
+                "otp_code": otp_code,
+                "meta": meta or {},
+                "timestamp": int(time.time()),
+            }
+            code, _ = _post_json_url(wh_url, wh_payload, headers=wh_hdrs, timeout=8)
+            results.append(("Webhook", 200 <= code < 300, f"HTTP {code}"))
+        except Exception as e:
+            results.append(("Webhook", False, str(e)[:80]))
+
+    if not results:
+        return {"ok": 0, "error": "尚未配置任何推送通道（Bark / Telegram / Webhook）"}
+
+    any_ok = any(r[1] for r in results)
+    summary = "；".join(f"{name}: {'成功' if ok_f else ('失败 ' + det)}" for name, ok_f, det in results)
+    record_comm_event(category, title, summary, ok=any_ok)
+    return {"ok": 1 if any_ok else 0, "summary": summary, "channels": [{"name": n, "ok": o, "detail": d} for n, o, d in results]}
+
+def start_flash_switch(target_slot=2, duration_sec=120, return_on_sms=True, radio_only=True):
+    """
+    「⏱️ 闪切接码防失联模式」：
+    临时切换至副卡驻网等待验证码短信（最长 duration_sec 秒，收到新短信可提前秒切回），
+    无论超时、异常还是手动取消，finally 块 100% 强制切回主流量卡并推送刚收到的短信。
+    """
+    t_slot = int(target_slot or 2)
+    if t_slot not in (1, 2):
+        return {"ok": 0, "error": "无效的目标卡槽"}
+    orig_slot = get_active_sim_slot_idx() + 1
+    if orig_slot == t_slot:
+        return {"ok": 0, "error": f"当前已经在 SIM {t_slot} 上，无需闪切"}
+    dur = max(30, min(300, int(duration_sec or 120)))
+
+    with SIM_SWITCH_LOCK:
+        if SIM_SWITCH_STATE["running"] or FLASH_SWITCH_STATE["running"]:
+            return {"ok": 0, "error": "已有切卡或闪切任务在运行"}
+        FLASH_CANCEL_EVENT.clear()
+        FLASH_SWITCH_STATE.update({
+            "running": True,
+            "phase": "switching_out",
+            "orig_slot": orig_slot,
+            "target_slot": t_slot,
+            "duration_sec": dur,
+            "started_at": time.time(),
+            "deadline": time.time() + dur + 35,
+            "finished_at": 0.0,
+            "return_on_sms": bool(return_on_sms),
+            "radio_only": bool(radio_only),
+            "captured_sms": [],
+            "msg": f"正在临时切往 SIM {t_slot} 驻网接码（期间远端网络短暂挂起，到时将自动切回 SIM {orig_slot}）...",
+            "error": "",
+        })
+
+    def _flash_worker():
+        had_wan_down = os.path.exists("/run/mu300/wan-user-down")
+        captured = []
+        try:
+            ok_prep, prep_msg = ensure_dual_sim_brokers_ready(save_hot=True)
+            if not ok_prep:
+                raise RuntimeError(f"双卡通道未就绪: {prep_msg}")
+
+            base_sms = list_slot_sms(t_slot).get("messages") or []
+            seen_ids = {str(m.get("id")) + ":" + str(m.get("time")) for m in base_sms if isinstance(m, dict)}
+
+            if radio_only and not had_wan_down:
+                os.makedirs("/run/mu300", exist_ok=True)
+                _atomic_write_text("/run/mu300/wan-user-down", "1\n", mode=0o644)
+
+            proc = subprocess.run(
+                ["/opt/mu300/bin/mu300-sim", "switch", str(t_slot)],
+                capture_output=True,
+                text=True,
+                timeout=95,
+                env=dict(os.environ, MU300_SIM_WAN_WAIT="25"),
+            )
+            if proc.returncode != 0:
+                err_s = ((proc.stdout or "") + "\n" + (proc.stderr or "")).strip()
+                raise RuntimeError(err_s.splitlines()[-1] if err_s else f"切往 SIM {t_slot} 失败")
+
+            wait_end = time.time() + dur
+            with SIM_SWITCH_LOCK:
+                FLASH_SWITCH_STATE["phase"] = "listening"
+                FLASH_SWITCH_STATE["deadline"] = wait_end
+                FLASH_SWITCH_STATE["msg"] = f"SIM {t_slot} 正在驻网监听短信验证码..."
+
+            while time.time() < wait_end and not FLASH_CANCEL_EVENT.is_set():
+                time.sleep(4.5)
+                cur_msgs = list_slot_sms(t_slot).get("messages") or []
+                for m in cur_msgs:
+                    key = str(m.get("id")) + ":" + str(m.get("time"))
+                    if key not in seen_ids:
+                        seen_ids.add(key)
+                        captured.append(m)
+                if captured:
+                    with SIM_SWITCH_LOCK:
+                        FLASH_SWITCH_STATE["captured_sms"] = list(captured)
+                        FLASH_SWITCH_STATE["msg"] = f"已捕获 {len(captured)} 条新短信，准备切回 SIM {orig_slot}..."
+                    if return_on_sms:
+                        break
+        except Exception as e:
+            with SIM_SWITCH_LOCK:
+                FLASH_SWITCH_STATE["error"] = str(e)
+        finally:
+            with SIM_SWITCH_LOCK:
+                FLASH_SWITCH_STATE["phase"] = "returning"
+                FLASH_SWITCH_STATE["msg"] = f"正在自动切回主流量卡 SIM {orig_slot} 并恢复数据连接..."
+            if not had_wan_down and os.path.exists("/run/mu300/wan-user-down"):
+                try:
+                    os.remove("/run/mu300/wan-user-down")
+                except OSError:
+                    pass
+            cur_active = get_active_sim_slot_idx() + 1
+            if cur_active != orig_slot:
+                for _attempt in range(2):
+                    r_back = subprocess.run(
+                        ["/opt/mu300/bin/mu300-sim", "switch", str(orig_slot)],
+                        capture_output=True,
+                        text=True,
+                        timeout=120,
+                        env=dict(os.environ, MU300_SIM_WAN_WAIT="45"),
+                    )
+                    if r_back.returncode == 0 or (get_active_sim_slot_idx() + 1) == orig_slot:
+                        break
+                    time.sleep(2)
+            _invalidate_cellular_caches()
+            p_orig = probe_sim_slot(orig_slot, power_sim=False, check_euicc=False)
+            if p_orig.get("iccid"):
+                sync_iccid_traffic_ledger(p_orig["iccid"], orig_slot - 1)
+            update_public_ip_async()
+
+            with SIM_SWITCH_LOCK:
+                FLASH_SWITCH_STATE.update({
+                    "running": False,
+                    "phase": "done",
+                    "finished_at": time.time(),
+                    "captured_sms": list(captured),
+                    "msg": (
+                        f"闪切完成！已捕获 {len(captured)} 条新短信并安全切回 SIM {orig_slot}"
+                        if captured else f"闪切结束，已安全切回 SIM {orig_slot} 恢复上网"
+                    ),
+                })
+
+            # 待主卡网络恢复后，立即将捕获到的副卡验证码短信推送出去
+            if captured:
+                time.sleep(3)
+                for m in captured:
+                    otp = m.get("otp_code") or extract_sms_otp(m.get("text", ""))
+                    sender = m.get("sender") or "未知号码"
+                    title = f"[SIM {t_slot} 闪切接码] {('验证码 ' + otp) if otp else ('来自 ' + sender)}"
+                    body = f"发件人: {sender}\n时间: {m.get('time', '')}\n内容: {m.get('text', '')}"
+                    dispatch_comm_push(title, body, category="flash_sms", otp_code=otp, meta={"slot": t_slot, "sender": sender})
+
+    threading.Thread(target=_flash_worker, daemon=True).start()
+    return {"ok": 1, "started": True, "orig_slot": orig_slot, "target_slot": t_slot, "duration_sec": dur}
+
+# -------------------------------------------------------------------------
+# Vonode 风格 5 步端到端蜂窝健康自检 & 秒级快速重拨换 IP & 信令语音保号
+# -------------------------------------------------------------------------
+def get_cellular_health():
+    """5 步端到端蜂窝链路健康诊断：1.SIM 鉴权 -> 2.基站驻网 -> 3.数据双栈承载 -> 4.IMS 核心网 -> 5.5G 射频评级"""
+    slot_idx = get_active_sim_slot_idx()
+    slot_num = slot_idx + 1
+    iface = "sipa_eth8" if slot_idx == 1 else "sipa_eth0"
+    slot_cache = load_sim_slot_cache().get(str(slot_idx), {}) if isinstance(load_sim_slot_cache().get(str(slot_idx)), dict) else {}
+    qos = get_cellular_qos()
+    ip_info = get_cellular_ip_info()
+
+    # Step 1: SIM Ready
+    cpin = slot_cache.get("cpin") or "READY"
+    if not slot_cache.get("iccid") and not os.path.exists("/run/mu300/sim-switching"):
+        p_res = probe_sim_slot(slot_num, power_sim=False, check_euicc=False)
+        cpin = p_res.get("cpin", cpin)
+        slot_cache = load_sim_slot_cache().get(str(slot_idx), {})
+    s1_ok = (cpin == "READY")
+    step_sim = {
+        "id": "sim",
+        "title": "1. SIM 触点与鉴权",
+        "status": "ok" if s1_ok else "error",
+        "summary": f"SIM {slot_num} 就绪 ({mask_iccid(slot_cache.get('iccid', '')) or 'CPIN READY'})" if s1_ok else f"SIM {slot_num} 异常 ({cpin})",
+    }
+
+    # Step 2: Network Registration
+    _, out_c5g = _slot_at(slot_idx, "AT+C5GREG?", timeout=3)
+    _, out_c4g = _slot_at(slot_idx, "AT+CEREG?", timeout=3)
+    m5 = re.search(r"\+C5GREG:\s*\d+,(\d+)", out_c5g)
+    m4 = re.search(r"\+CEREG:\s*\d+,(\d+)", out_c4g)
+    st5 = int(m5.group(1)) if m5 else 0
+    st4 = int(m4.group(1)) if m4 else 0
+    reg_ok = (st5 in (1, 5)) or (st4 in (1, 5))
+    roam_tag = "漫游驻网" if (st5 == 5 or st4 == 5) else "本地驻网"
+    step_reg = {
+        "id": "reg",
+        "title": "2. 运营商驻网",
+        "status": "ok" if reg_ok else "error",
+        "summary": f"{qos.get('operator_name', '未知')} · {qos.get('rat', '5G')} {qos.get('band', '')} ({roam_tag})" if reg_ok else f"未驻网 (5G={st5}, 4G={st4})",
+    }
+
+    # Step 3: Packet Bearer & Dual-Stack IP
+    v4 = ip_info.get("ipv4", "")
+    v6 = ip_info.get("ipv6", "")
+    user_down = os.path.exists("/run/mu300/wan-user-down")
+    s3_ok = bool(v4 or v6)
+    step_data = {
+        "id": "data",
+        "title": "3. 数据承载与双栈",
+        "status": "ok" if s3_ok else ("warn" if user_down else "error"),
+        "summary": (
+            f"{iface}: {v4 or '无v4'}" + (" + IPv6 双栈" if v6 else " (单栈 IPv4)")
+            if s3_ok else ("已手动关闭移动数据" if user_down else f"{iface} 未获取到运营商 IP")
+        ),
+    }
+
+    # Step 4: IMS (VoLTE / SMS over IP)
+    _, out_ims = _slot_at(slot_idx, "AT+CAVIMS?", timeout=3)
+    ims_on = "+CAVIMS: 1" in out_ims
+    step_ims = {
+        "id": "ims",
+        "title": "4. IMS 短信/语音域",
+        "status": "ok" if ims_on else "warn",
+        "summary": "IMS 已激活 (5G 短信 / VoLTE 就绪)" if ims_on else "IMS 未激活 (回落传统信令)",
+    }
+
+    # Step 5: 5G RF Signal Grade
+    rsrp = int(qos.get("rsrp", -110) or -110)
+    sinr = float(qos.get("sinr", 0.0) or 0.0)
+    if rsrp >= -85 and sinr >= 10:
+        sig_st, sig_grade = "ok", "极佳"
+    elif rsrp >= -98 and sinr >= 3:
+        sig_st, sig_grade = "ok", "良好"
+    elif rsrp >= -108:
+        sig_st, sig_grade = "warn", "一般"
+    else:
+        sig_st, sig_grade = "error", "偏弱"
+    step_sig = {
+        "id": "signal",
+        "title": "5. 射频信号质量",
+        "status": sig_st,
+        "summary": f"{sig_grade} · RSRP {rsrp} dBm / SINR {sinr} dB",
+    }
+
+    steps = [step_sim, step_reg, step_data, step_ims, step_sig]
+    ok_cnt = sum(1 for s in steps if s["status"] == "ok")
+    overall = "healthy" if (s1_ok and reg_ok and s3_ok) else ("degraded" if (s1_ok and reg_ok) else "offline")
+    return {
+        "ok": 1,
+        "slot": slot_num,
+        "iface": iface,
+        "overall": overall,
+        "score": ok_cnt,
+        "steps": steps,
+    }
+
+def fast_cellular_redial():
+    """秒级快速重拨刷新运营商公网 IPv4 / IPv6（配合 fast-redial.conf 跳过 15s 冷启动等待）"""
+    old_info = get_cellular_ip_info()
+    if os.path.exists("/run/mu300/wan-user-down"):
+        try:
+            os.remove("/run/mu300/wan-user-down")
+        except OSError:
+            pass
+    t0 = time.time()
+    proc = subprocess.run(["systemctl", "restart", "mu300-mobile-data.service"], capture_output=True, text=True, timeout=45)
+    _invalidate_cellular_caches()
+    new_info = get_cellular_ip_info()
+    pub_v4 = fetch_public_ipv4()
+    if pub_v4:
+        PUBLIC_IP_CACHE["ip"] = pub_v4
+        PUBLIC_IP_CACHE["time"] = time.time()
+        new_info["public_ipv4"] = pub_v4
+    elapsed = round(time.time() - t0, 1)
+    if proc.returncode != 0:
+        return {"ok": 0, "error": (proc.stderr or proc.stdout or "重拨失败").strip(), "elapsed_s": elapsed}
+    return {
+        "ok": 1,
+        "elapsed_s": elapsed,
+        "old_ipv4": old_info.get("public_ipv4") or old_info.get("ipv4", ""),
+        "new_ipv4": new_info.get("public_ipv4") or new_info.get("ipv4", ""),
+        "new_ipv6": new_info.get("ipv6", ""),
+        "iface": new_info.get("iface", ""),
+        "msg": f"快速重拨完成（耗时 {elapsed}s），已刷新数据承载 IP",
+    }
+
+def get_call_status(slot_num=None):
+    idx = get_active_sim_slot_idx() if slot_num is None else (1 if int(slot_num) == 2 else 0)
+    ok_at, out = _slot_at(idx, "AT+CLCC", timeout=4)
+    state_map = {"0": "通话中", "1": "保持中", "2": "拨号呼叫中", "3": "对方振铃中", "4": "来电振铃中", "5": "等待接听"}
+    calls = []
+    if ok_at:
+        for line in out.splitlines():
+            m = re.match(r'\+CLCC:\s*(\d+),(\d+),(\d+),(\d+),(\d+)(?:,"([^"]*)")?', line.strip())
+            if m:
+                calls.append({
+                    "id": int(m.group(1)),
+                    "direction": "incoming" if m.group(2) == "1" else "outgoing",
+                    "state_code": int(m.group(3)),
+                    "state_text": state_map.get(m.group(3), "未知"),
+                    "mode": "voice" if m.group(4) == "0" else "other",
+                    "number": m.group(6) or "未知号码",
+                })
+    events = [
+        e for e in (_load_json_dict(COMM_EVENTS_FILE, {"items": []}).get("items") or [])
+        if isinstance(e, dict) and e.get("kind") in ("call", "dial")
+    ]
+    return {"ok": 1, "slot": idx + 1, "calls": calls, "recent_calls": events[:10]}
+
+def dial_voice_call(number, slot_num=None):
+    num = re.sub(r"[\s\-()]", "", str(number or ""))
+    if not re.fullmatch(r"\+?[0-9*#]{2,24}", num):
+        return {"ok": 0, "error": "号码格式无效（仅允许数字、+、*、#，长度 2~24 位）"}
+    idx = get_active_sim_slot_idx() if slot_num is None else (1 if int(slot_num) == 2 else 0)
+    _slot_at(idx, "AT+CLIP=1", timeout=3)
+    ok_at, out = _slot_at(idx, f"ATD{num};", timeout=8)
+    if not ok_at or ("ERROR" in out and "OK" not in out):
+        return {"ok": 0, "error": out.splitlines()[-1] if out else "拨号指令未获响应"}
+    record_comm_event("dial", f"SIM {idx + 1} 外呼保号", f"已拨打 {num}", ok=True)
+    return {"ok": 1, "slot": idx + 1, "number": num, "msg": f"已通过 SIM {idx + 1} 发起信令语音呼叫: {num}"}
+
+def send_call_dtmf(digits, slot_num=None):
+    d_str = str(digits or "").strip().upper()
+    if not re.fullmatch(r"[0-9A-D*#]{1,8}", d_str):
+        return {"ok": 0, "error": "DTMF 按键仅支持 0-9、A-D、*、#"}
+    idx = get_active_sim_slot_idx() if slot_num is None else (1 if int(slot_num) == 2 else 0)
+    for ch in d_str:
+        ok_at, out = _slot_at(idx, f'AT+VTS="{ch}"', timeout=4)
+        if not ok_at:
+            return {"ok": 0, "error": out or "发送 DTMF 失败"}
+    return {"ok": 1, "digits": d_str}
+
+def hangup_voice_call(slot_num=None):
+    idx = get_active_sim_slot_idx() if slot_num is None else (1 if int(slot_num) == 2 else 0)
+    ok_at, out = _slot_at(idx, "AT+CHUP", timeout=5)
+    if not ok_at:
+        ok_at, out = _slot_at(idx, "ATH", timeout=5)
+    return {"ok": 1 if ok_at else 0, "msg": "已挂断当前通话", "detail": out[:80]}
+
+def handle_sim_comm_api(method, req_data):
+    """统一路由 Phase 1 新增的 SIM 双卡、蜂窝健康、短信 OTP 推送与语音信令 API"""
+    req_data = req_data if isinstance(req_data, dict) else {}
+
+    if method == "sim.overview":
+        return get_sim_overview(refresh_active=bool(req_data.get("refresh")))
+    if method == "sim.probe_slot":
+        return probe_sim_slot(
+            req_data.get("slot", 2),
+            power_sim=bool(req_data.get("power_sim", True)),
+            check_euicc=bool(req_data.get("check_euicc", True)),
+        )
+    if method == "sim.enable_live":
+        ok_p, msg_p = ensure_dual_sim_brokers_ready(save_hot=True)
+        return {"ok": 1 if ok_p else 0, "msg": "双卡在线热切守护已就绪" if ok_p else msg_p, "overview": get_sim_overview()}
+    if method == "sim.switch":
+        return start_live_sim_switch(
+            req_data.get("slot", 1),
+            wan_wait=req_data.get("wan_wait", 45),
+            make_default=bool(req_data.get("make_default", False)),
+            reason="manual",
+        )
+    if method == "sim.switch_status":
+        return get_sim_switch_status()
+    if method == "sim.flash_switch":
+        return start_flash_switch(
+            target_slot=req_data.get("slot", 2),
+            duration_sec=req_data.get("duration_sec", 120),
+            return_on_sms=bool(req_data.get("return_on_sms", True)),
+            radio_only=bool(req_data.get("radio_only", True)),
+        )
+    if method == "sim.flash_cancel":
+        FLASH_CANCEL_EVENT.set()
+        return {"ok": 1, "msg": "已发送提前切回指令，正在恢复主流量卡..."}
+    if method == "sim.card_save":
+        return save_sim_card_profile(req_data)
+
+    if method == "cellular.health":
+        return get_cellular_health()
+    if method == "cellular.redial":
+        return fast_cellular_redial()
+
+    if method == "sms.list":
+        return list_slot_sms(req_data.get("slot"))
+    if method in ("comm.push_get", "sms.push_get"):
+        return get_comm_push_public_view()
+    if method in ("comm.push_set", "sms.push_set"):
+        return save_comm_push_conf(req_data)
+    if method in ("comm.push_test", "sms.push_test"):
+        return dispatch_comm_push(
+            "U30 Air 通信中心推送测试",
+            f"测试时间: {time.strftime('%Y-%m-%d %H:%M:%S')}\n当前主用卡槽: SIM {get_active_sim_slot_idx() + 1}",
+            category="test",
+            otp_code="864209",
+            force=True,
+        )
+
+    if method == "call.status":
+        return get_call_status(req_data.get("slot"))
+    if method == "call.dial":
+        return dial_voice_call(req_data.get("number", ""), req_data.get("slot"))
+    if method == "call.dtmf":
+        return send_call_dtmf(req_data.get("digits", ""), req_data.get("slot"))
+    if method == "call.hangup":
+        return hangup_voice_call(req_data.get("slot"))
+
+    return None
+
+def start_comm_and_quota_watcher():
+    """
+    极轻量后台通信与配额守护线程 (零额外常驻进程):
+    1. 实时监控 URC 日志中的来电 (+CLIP / RING) 与新短信提示 (+CMTI)，按策略自动拒接来电并推送通知
+    2. 新短信自动识别 4~8 位验证码推送到 Bark / Telegram / Webhook
+    3. 检查当前 SIM 独立流量上限：若配置了 over_limit_action == 'switch_sim' 且达到 100%，自动热切至备用流量卡
+    """
+    def _watcher_loop():
+        time.sleep(8)
+        urc_offsets = {}
+        clip_armed_slot = None
+        last_sms_poll = 0.0
+        last_quota_poll = 0.0
+        auto_switched_iccids = set()
+
+        # 初始化已有短信已读指纹，避免服务重启时重复推送历史旧短信
+        seen_data = _load_json_dict(COMM_PUSH_SEEN_FILE, {"sms": []})
+        seen_sms = set(seen_data.get("sms") or [])
+        if not seen_sms:
+            init_msgs = list_slot_sms().get("messages") or []
+            for m in init_msgs:
+                seen_sms.add(f"{m.get('slot', 1)}:{m.get('id')}:{m.get('time')}")
+            if seen_sms:
+                _atomic_write_text(COMM_PUSH_SEEN_FILE, json.dumps({"sms": list(seen_sms)[-200:]}), mode=0o600)
+
+        while True:
+            time.sleep(10)
+            try:
+                if os.path.exists("/run/mu300/sim-switching") or FLASH_SWITCH_STATE.get("running"):
+                    continue
+
+                slot_idx = get_active_sim_slot_idx()
+                if clip_armed_slot != slot_idx:
+                    ok_clip, _ = _slot_at(slot_idx, "AT+CLIP=1", timeout=3)
+                    if ok_clip:
+                        clip_armed_slot = slot_idx
+
+                # 1. 零 AT 开销增量扫描内存 URC 日志 (/run/mu300-at*/urc/*.log)
+                cmti_hit = False
+                for s_i, urc_p in ((0, "/run/mu300-at/urc/stty_nr0.log"), (1, "/run/mu300-at4/urc/stty_nr3.log")):
+                    if not os.path.exists(urc_p):
+                        continue
+                    st_sz = os.path.getsize(urc_p)
+                    prev_off = urc_offsets.get(urc_p)
+                    if prev_off is None:
+                        urc_offsets[urc_p] = st_sz
+                        continue
+                    if st_sz < prev_off:
+                        prev_off = 0
+                    if st_sz == prev_off:
+                        continue
+                    with open(urc_p, "r", encoding="utf-8", errors="ignore") as uf:
+                        uf.seek(prev_off)
+                        chunk = uf.read(65536)
+                        urc_offsets[urc_p] = uf.tell()
+                    caller_num = ""
+                    ring_seen = False
+                    for raw_l in chunk.splitlines():
+                        l = raw_l.strip()
+                        if "+CMTI:" in l:
+                            cmti_hit = True
+                        elif l.startswith("+CLIP:"):
+                            m_cl = re.search(r'\+CLIP:\s*"([^"]*)"', l)
+                            if m_cl and m_cl.group(1):
+                                caller_num = m_cl.group(1)
+                            ring_seen = True
+                        elif l == "RING":
+                            ring_seen = True
+                    if ring_seen:
+                        p_cfg = load_comm_push_conf()
+                        disp_num = caller_num or "未知来电号码"
+                        hung = False
+                        if p_cfg.get("auto_hangup_calls"):
+                            _slot_at(s_i, "AT+CHUP", timeout=4)
+                            hung = True
+                        act_str = "已自动挂断防打扰" if hung else "正在振铃"
+                        record_comm_event("call", f"SIM {s_i + 1} 来电: {disp_num}", act_str, ok=True)
+                        if p_cfg.get("enabled") and p_cfg.get("push_calls", True):
+                            dispatch_comm_push(
+                                f"[SIM {s_i + 1} 来电提醒] {disp_num}",
+                                f"来电号码: {disp_num}\n处理状态: {act_str}\n时间: {time.strftime('%Y-%m-%d %H:%M:%S')}",
+                                category="call",
+                                meta={"slot": s_i + 1, "caller": disp_num, "auto_hung_up": hung},
+                            )
+
+                # 2. 新短信轮询与 Bark / TG / Webhook 推送 (URC 命中立即读，平时每 35s 巡检一次)
+                now = time.time()
+                p_cfg = load_comm_push_conf()
+                if cmti_hit or (p_cfg.get("enabled") and p_cfg.get("push_sms", True) and (now - last_sms_poll >= 35)):
+                    last_sms_poll = now
+                    sms_res = list_slot_sms(slot_idx + 1)
+                    msgs = sms_res.get("messages") or []
+                    dirty_seen = False
+                    for m in reversed(msgs):
+                        sig = f"{slot_idx + 1}:{m.get('id')}:{m.get('time')}"
+                        if sig in seen_sms:
+                            continue
+                        seen_sms.add(sig)
+                        dirty_seen = True
+                        if p_cfg.get("enabled") and p_cfg.get("push_sms", True):
+                            otp = m.get("otp_code") or extract_sms_otp(m.get("text", ""))
+                            sender = m.get("sender") or "未知号码"
+                            title = f"[SIM {slot_idx + 1} 新短信] {('验证码 ' + otp) if otp else ('来自 ' + sender)}"
+                            body = f"发件人: {sender}\n时间: {m.get('time', '')}\n内容: {m.get('text', '')}"
+                            dispatch_comm_push(title, body, category="sms", otp_code=otp, meta={"slot": slot_idx + 1, "sender": sender})
+                    if dirty_seen:
+                        _atomic_write_text(COMM_PUSH_SEEN_FILE, json.dumps({"sms": list(seen_sms)[-200:]}), mode=0o600)
+
+                # 3. 独立流量超额自动切换备用 SIM 卡巡检 (每 60s 一次)
+                if now - last_quota_poll >= 60:
+                    last_quota_poll = now
+                    slot_cache = load_sim_slot_cache()
+                    cur_iccid = str((slot_cache.get(str(slot_idx)) or {}).get("iccid") or "")
+                    if cur_iccid and cur_iccid not in auto_switched_iccids:
+                        sync_iccid_traffic_ledger(cur_iccid, slot_idx)
+                        prof = (load_sim_cards_db().get("cards") or {}).get(cur_iccid) or {}
+                        if prof.get("over_limit_action") == "switch_sim":
+                            tr = read_iccid_traffic_summary(cur_iccid, is_active=True, force=True)
+                            over_month = tr["cap_bytes"] > 0 and tr["cycle_bytes"] >= tr["cap_bytes"]
+                            over_day = tr["daily_cap_bytes"] > 0 and tr["today_bytes"] >= tr["daily_cap_bytes"]
+                            if over_month or over_day:
+                                backup_slot = 2 if slot_idx == 0 else 1
+                                auto_switched_iccids.add(cur_iccid)
+                                sw_r = start_live_sim_switch(backup_slot, wan_wait=45, make_default=False, reason="quota_failover")
+                                if sw_r.get("ok"):
+                                    dispatch_comm_push(
+                                        f"[流量超限自动切卡] SIM {slot_idx + 1} -> SIM {backup_slot}",
+                                        f"SIM {slot_idx + 1} ({prof.get('nickname') or mask_iccid(cur_iccid)}) 已达设定流量上限，正在自动热切换至备用卡 SIM {backup_slot}。",
+                                        category="quota_switch",
+                                    )
+            except Exception as e:
+                print(f"[CommWatcher] {e}")
+
+    threading.Thread(target=_watcher_loop, daemon=True).start()
 
 def handle_login_request(client_ip, req_json):
     now = time.time()
@@ -3630,6 +5463,11 @@ class WebUIHandler(BaseHTTPRequestHandler):
                     self.send_json(pwr_resp)
                     return
 
+            sim_comm_resp = handle_sim_comm_api(method, req_data)
+            if sim_comm_resp is not None:
+                self.send_json(sim_comm_resp)
+                return
+
             resp = run_mu300_api(method, req_data)
             if method.startswith("power.") or method.startswith("wifi.") or method.startswith("vpn."):
                 BATTERY_INFO_CACHE["time"] = 0
@@ -3656,6 +5494,7 @@ def main():
     print(f"[*] 监听端口: {PORT}")
     update_public_ip_async()
     start_log_guardian()
+    start_comm_and_quota_watcher()
     server = ThreadedHTTPServer(("0.0.0.0", PORT), WebUIHandler)
     try:
         server.serve_forever()

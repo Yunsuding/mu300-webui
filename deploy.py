@@ -133,6 +133,22 @@ def deploy(target_host: str = None, check_only: bool = False, with_runtime: bool
             (RUNTIME_BASE / "opt-mu300/bin/u30air-wait-uplink", "/opt/mu300/bin/u30air-wait-uplink", "755"),
             (RUNTIME_BASE / "opt-mu300/bin/mu300-update", "/opt/mu300/bin/mu300-update", "755"),
             (RUNTIME_BASE / "opt-mu300/bin/mu300-extra", "/opt/mu300/bin/mu300-extra", "755"),
+            (RUNTIME_BASE / "opt-mu300/lib/sim-config.sh", "/opt/mu300/lib/sim-config.sh", "644"),
+            (RUNTIME_BASE / "opt-mu300/bin/mu300-sim", "/opt/mu300/bin/mu300-sim", "755"),
+            (RUNTIME_BASE / "opt-mu300/bin/mu300-sim-u30", "/opt/mu300/bin/mu300-sim-u30", "755"),
+            (RUNTIME_BASE / "opt-mu300/bin/mu300-sim2-start", "/opt/mu300/bin/mu300-sim2-start", "755"),
+            (RUNTIME_BASE / "opt-mu300/bin/mu300-sim2-warmup", "/opt/mu300/bin/mu300-sim2-warmup", "755"),
+            (RUNTIME_BASE / "opt-mu300/bin/mu300-sim-boot-prep", "/opt/mu300/bin/mu300-sim-boot-prep", "755"),
+            (RUNTIME_BASE / "opt-mu300/bin/mobile-data", "/opt/mu300/bin/mobile-data", "755"),
+            (RUNTIME_BASE / "opt-mu300/bin/sms", "/opt/mu300/bin/sms", "755"),
+            (RUNTIME_BASE / "opt-mu300/bin/mu300-ussd", "/opt/mu300/bin/mu300-ussd", "755"),
+            (RUNTIME_BASE / "systemd/mu300-atd4.service", "/etc/systemd/system/mu300-atd4.service", "644"),
+            (RUNTIME_BASE / "systemd/mu300-atd5.service", "/etc/systemd/system/mu300-atd5.service", "644"),
+            (RUNTIME_BASE / "systemd/mu300-sim-prepare.service", "/etc/systemd/system/mu300-sim-prepare.service", "644"),
+            (RUNTIME_BASE / "systemd/mu300-sim-warmup.service", "/etc/systemd/system/mu300-sim-warmup.service", "644"),
+            (RUNTIME_BASE / "systemd/mu300-atd.service.d/u30air-slot0.conf", "/etc/systemd/system/mu300-atd.service.d/u30air-slot0.conf", "644"),
+            (RUNTIME_BASE / "systemd/mu300-atd2.service.d/u30air-slot0.conf", "/etc/systemd/system/mu300-atd2.service.d/u30air-slot0.conf", "644"),
+            (RUNTIME_BASE / "systemd/mu300-mobile-data.service.d/fast-redial.conf", "/etc/systemd/system/mu300-mobile-data.service.d/fast-redial.conf", "644"),
             (RUNTIME_BASE / "extra-vpn/bin/mu300-vpn", "/mnt/mu300-disk/extra/vpn/bin/mu300-vpn", "755"),
             (RUNTIME_BASE / "extra-vpn/lib/vpn/mihomo.sh", "/mnt/mu300-disk/extra/vpn/lib/vpn/mihomo.sh", "755"),
         ]
@@ -157,12 +173,19 @@ def deploy(target_host: str = None, check_only: bool = False, with_runtime: bool
             lines = []
             for idx, (lpath, rdest, mode) in enumerate(runtime_sync_list):
                 if lpath.exists():
-                    rdir = os.path.dirname(rdest)
-                    lines.append(
-                        f"if [ -d {shlex.quote(rdir)} ]; then cp -f {REMOTE_TMP_DIR}/runtime/item_{idx} {shlex.quote(rdest)} "
-                        f"&& chown root:root {shlex.quote(rdest)} && chmod {mode} {shlex.quote(rdest)}; fi"
-                    )
+                    if rdest.startswith("/mnt/mu300-disk/extra/vpn/"):
+                        rdir = os.path.dirname(rdest)
+                        lines.append(
+                            f"if [ -d {shlex.quote(rdir)} ]; then install -D -o root -g root -m {mode} {REMOTE_TMP_DIR}/runtime/item_{idx} {shlex.quote(rdest)}; fi"
+                        )
+                    else:
+                        lines.append(
+                            f"install -D -o root -g root -m {mode} {REMOTE_TMP_DIR}/runtime/item_{idx} {shlex.quote(rdest)}"
+                        )
             lines.append("rm -rf /etc/cockpit /mnt/mu300-disk/extra/panel /usr/local/bin/mu300-panel")
+            lines.append("systemctl daemon-reload")
+            lines.append("systemctl enable mu300-atd4.service mu300-atd5.service mu300-sim-prepare.service mu300-sim-warmup.service 2>/dev/null || true")
+            lines.append("if [ -x /opt/mu300/bin/mu300-sim-boot-prep ]; then /opt/mu300/bin/mu300-sim-boot-prep enable-live || true; fi")
             rt_install_cmds = " && ".join(lines) + " && "
 
         print("[*] Running installer on device ...")

@@ -1,0 +1,16 @@
+[Unit]
+Description=MU300 dual-SIM cold-boot radio bring-up (U30 Air)
+ConditionPathExists=/run/mu300-radio-freeze
+After=mu300-vendor.service mu300-sim-prepare.service mu300-atd.service mu300-atd2.service mu300-atd4.service mu300-atd5.service
+Wants=mu300-atd.service mu300-atd2.service mu300-atd4.service mu300-atd5.service
+Before=mu300-mobile-data.service
+
+[Service]
+Type=oneshot
+RemainAfterExit=yes
+ExecStart=/opt/mu300/bin/mu300-sim2-warmup
+ExecStartPost=/bin/sh -c '[ ! -e /run/mu300/sim-radio-ready ] || : >/run/mu300-ril-handshake'
+TimeoutStartSec=180
+
+[Install]
+WantedBy=multi-user.target

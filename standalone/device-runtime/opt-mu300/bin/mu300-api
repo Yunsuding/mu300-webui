@@ -49,6 +49,7 @@ FWDA=${MU300_FWD_ADAPTER:-$R/usr/libexec/unisoc-modem/forward}
 DASHDIR=${MU300_DASH_DIR:-$R/var/run/unisoc-modem}
 HOTSPOT=$R/etc/mu300/hotspot.conf
 MDCONF=$R/etc/mu300/mobile-data.conf
+MDCONF_SIM2=$R/etc/mu300/mobile-data-sim2.conf
 LANCONF=$R/etc/mu300/lan.conf
 INPUT_MAX=65536
 NL='
@@ -70,6 +71,8 @@ data.set
 data.power
 sim.get
 sim.select
+sim.hot
+sim.switch
 sim.card
 sim.state
 voice.get
@@ -714,17 +717,30 @@ m_wificlient_leave() {
 }
 
 # ------------------------------------------------------------------ mobile data, the SIM, the locks
+active_slot_idx() {
+    _as=0
+    [ -x "$BIN/mu300-sim" ] && _as=$(timed 5 "$BIN/mu300-sim" active 2>/dev/null | head -n 1 | tr -cd '0-1')
+    printf '%s\n' "${_as:-0}"
+}
+mdconf_for_slot() {
+    if [ "${1:-0}" = 1 ]; then printf '%s\n' "$MDCONF_SIM2"; else printf '%s\n' "$MDCONF"; fi
+}
 m_data_get() {
-    only
+    only slot
+    _as=$(active_slot_idx)
+    _sl=$((_as + 1))
+    int slot 1 2 && _sl=$V
+    _tidx=$((_sl - 1))
     _da=$(data_addr)
     if is_openwrt; then
         _apn=$(uci_q get network.wan.apn); _pdp=$(uci_q get network.wan.pdptype)
         _user=$(uci_q get network.wan.username); _auth=$(uci_q get network.wan.auth)
         _pw=$([ -n "$(uci_q get network.wan.password)" ] && echo true || echo false)
     else
-        _apn=$(conf_unq MU300_APN "$MDCONF"); _pdp=$(conf_unq MU300_PDP_TYPE "$MDCONF")
-        _user=$(conf_unq MU300_APN_USER "$MDCONF"); _auth=$(conf_unq MU300_APN_AUTH "$MDCONF")
-        _pw=$([ -n "$(conf_unq MU300_APN_PASSWORD "$MDCONF")" ] && echo true || echo false)
+        _mdc=$(mdconf_for_slot "$_tidx")
+        _apn=$(conf_unq MU300_APN "$_mdc"); _pdp=$(conf_unq MU300_PDP_TYPE "$_mdc")
+        _user=$(conf_unq MU300_APN_USER "$_mdc"); _auth=$(conf_unq MU300_APN_AUTH "$_mdc")
+        _pw=$([ -n "$(conf_unq MU300_APN_PASSWORD "$_mdc")" ] && echo true || echo false)
     fi
     _sim=null
     [ -x "$BIN/mu300-sim" ] && _sim=$(jcheck "$(timed 10 "$BIN/mu300-sim" status --json 2>/dev/null)")
@@ -735,8 +751,8 @@ m_data_get() {
         _rj=$(timed 10 "$BIN/mobile-data" roaming --json 2>/dev/null | head -n 1)
         case $_rj in '{"allowed":'*) _roam=$(jcheck "$_rj") && _rsw=true ;; esac
     fi
-    printf '{"ok":1,"state":%s,"iface":%s,"address":%s,"apn":%s,"pdp":%s,"auth":%s,"user":%s,"password_set":%s,' \
-        "$(js "$(data_service)")" "$(js "${_da%% *}")" "$(js "${_da#* }")" "$(js "$_apn")" "$(js "${_pdp:-IP}")" \
+    printf '{"ok":1,"slot":%d,"state":%s,"iface":%s,"address":%s,"apn":%s,"pdp":%s,"auth":%s,"user":%s,"password_set":%s,' \
+        "$_sl" "$(js "$(data_service)")" "$(js "${_da%% *}")" "$(js "${_da#* }")" "$(js "$_apn")" "$(js "${_pdp:-IP}")" \
         "$(js "$_auth")" "$(js "$_user")" "$_pw"
     printf '"signal":%s,"sim":%s,"roaming":%s,"roaming_switch":%s}\n' "$(signal_json)" "$_sim" "$_roam" "$_rsw"
     exit 0
@@ -745,7 +761,11 @@ m_data_get() {
 # without a quote or a backslash, at most 64 each
 cred_ok() { allowed "$1" '[ -~]{0,64}' && case $1 in *[\"\'\\]*|' '*|*' ') false ;; *) true ;; esac; }
 m_data_set() {
-    only apn pdp auth user password clear_credentials roaming
+    only slot apn pdp auth user password clear_credentials roaming
+    _as=$(active_slot_idx)
+    _sl=$((_as + 1))
+    int slot 1 2 && _sl=$V
+    _tidx=$((_sl - 1))
     _apn=- _pdp=- _auth=- _user=- _pw=- _roam=-
     fget apn && { [ "$FT" = s ] && { [ -z "$FV" ] || allowed "$FV" '[A-Za-z0-9]([A-Za-z0-9.-]{0,98}[A-Za-z0-9])?'; } || refuse bad-value apn; _apn=$FV; }
     word pdp 'IP|IPV6|IPV4V6' && _pdp=$V
@@ -754,7 +774,7 @@ m_data_set() {
     fget password && { [ "$FT" = s ] && [ -n "$FV" ] && cred_ok "$FV" || refuse bad-value password; _pw=$FV; }
     flag clear_credentials
     if [ "${V:-0}" = 1 ]; then _user= _pw= _auth=; fi
-    # roaming: true allows data while roaming, false keeps it down there (the SIM in use; mobile-data roaming on|off)
+    # roaming: true allows data while roaming, false keeps it down there (the requested or active SIM; mobile-data roaming on|off)
     if flag roaming; then
         if [ "$V" = 1 ]; then _roam=on; else _roam=off; fi
     fi
@@ -762,7 +782,7 @@ m_data_set() {
     checked
     if [ "$_roam" != - ]; then
         [ -x "$BIN/mobile-data" ] || refuse unsupported roaming
-        tool 15 "$BIN/mobile-data" roaming "$_roam"
+        tool 15 "$BIN/mobile-data" roaming "$_roam" --slot "$_tidx"
         [ "$RC" = 0 ] || refuse failed "$ERR"
         # the setting alone: the dial and its watchdog take it up within half a minute, nothing is restarted
         [ "$_apn$_pdp$_auth$_user$_pw" != ----- ] || ok '"restart":false'
@@ -778,21 +798,33 @@ m_data_set() {
             echo 'commit network'
         } | uci_batch || refuse failed uci
         later ifup wan
+        ok '"restart":true'
     else
+        _mdc=$(mdconf_for_slot "$_tidx")
         set --
         [ "$_apn" = - ] || set -- "$@" "MU300_APN=$_apn"
         [ "$_pdp" = - ] || set -- "$@" "MU300_PDP_TYPE=$_pdp"
         [ "$_auth" = - ] || set -- "$@" "MU300_APN_AUTH=$_auth"
         [ "$_user" = - ] || set -- "$@" "MU300_APN_USER=$_user"
         [ "$_pw" = - ] || set -- "$@" "MU300_APN_PASSWORD=$_pw"
-        conf_put "$MDCONF" 600 "$@" || refuse failed "could not write mobile-data.conf"
-        later systemctl restart mu300-mobile-data
+        conf_put "$_mdc" 600 "$@" || refuse failed "could not write mobile-data config"
+        if [ "$_tidx" = "$_as" ]; then
+            later systemctl restart mu300-mobile-data
+            ok '"restart":true'
+        fi
+        ok '"restart":false'
     fi
-    ok '"restart":true'
 }
 m_data_power() {
     only state
     word state 'on|off'; need state
+    checked
+    mkdir -p "$R/run/mu300" 2>/dev/null || true
+    if [ "$V" = on ]; then
+        rm -f "$R/run/mu300/wan-user-down"
+    else
+        printf '1\n' >"$R/run/mu300/wan-user-down" 2>/dev/null || true
+    fi
     # as mu300-traffic's cap does it
     if is_openwrt; then
         if [ "$V" = on ]; then later ifup wan; else later ifdown wan; fi
@@ -813,6 +845,24 @@ m_sim_select() {
     [ -x "$BIN/mu300-sim" ] || refuse unsupported mu300-sim
     checked
     tool 60 "$BIN/mu300-sim" default "$V" </dev/null || refuse failed "$ERR"
+    ok "\"sim\":$(jcheck "$OUT"),\"text\":$(js "$OUT")"
+}
+m_sim_hot() {
+    only enabled
+    flag enabled; need enabled
+    [ -x "$BIN/mu300-sim" ] || refuse unsupported mu300-sim
+    checked
+    tool 30 "$BIN/mu300-sim" hot "$V" </dev/null || refuse failed "$ERR"
+    _t=$OUT
+    tool 15 "$BIN/mu300-sim" status --json </dev/null || refuse failed "$ERR"
+    ok "\"sim\":$(jcheck "$OUT"),\"text\":$(js "$_t")"
+}
+m_sim_switch() {
+    only slot
+    int slot 1 2; need slot
+    [ -x "$BIN/mu300-sim" ] || refuse unsupported mu300-sim
+    checked
+    tool 180 "$BIN/mu300-sim" switch "$V" </dev/null || refuse failed "$ERR"
     ok "\"sim\":$(jcheck "$OUT"),\"text\":$(js "$OUT")"
 }
 # the ZTE V50's card for the next boot (mu300-sim card, FINDINGS 204): ZTE's card ID 0-3, or "none" (the switches as
@@ -846,7 +896,8 @@ m_sim_state() {
 }
 # VoLTE and VoNR per card (mobile-data voice, FINDINGS 184): the saved choices, and what the card in use says now
 m_voice_get() {
-    only
+    only slot
+    int slot 1 2 || true
     [ -x "$BIN/mobile-data" ] || refuse unsupported mobile-data
     tool 20 "$BIN/mobile-data" voice --json --read </dev/null
     _j=$(jcheck "$OUT") || refuse failed "$ERR"
@@ -864,7 +915,8 @@ m_voice_set() {
 }
 # each SIM's radio on or off, kept across reboots (mu300-sim-radio, FINDINGS 185); slot 1, 2 or "all" (airplane mode)
 m_radio_get() {
-    only
+    only slot
+    int slot 1 2 || true
     [ -x "$BIN/mu300-sim-radio" ] || refuse unsupported mu300-sim-radio
     tool 15 "$BIN/mu300-sim-radio" status --json </dev/null
     _j=$(jcheck "$OUT") || refuse failed "$ERR"
@@ -2032,6 +2084,8 @@ case $METHOD in
     data.power) m_data_power ;;
     sim.get) m_sim_get ;;
     sim.select) m_sim_select ;;
+    sim.hot) m_sim_hot ;;
+    sim.switch) m_sim_switch ;;
     sim.card) m_sim_card ;;
     sim.state) m_sim_state ;;
     voice.get) m_voice_get ;;

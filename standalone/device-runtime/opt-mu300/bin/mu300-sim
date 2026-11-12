@@ -25,7 +25,7 @@ device_name() {
     "$device_cmd" 2>/dev/null || true
 }
 SIM_CONFIG_U30=0
-if [ -e "$root/etc/openwrt_release" ] && [ "$(device_name)" = u30air ]; then SIM_CONFIG_U30=1; fi
+if [ "$(device_name)" = u30air ]; then SIM_CONFIG_U30=1; fi
 export SIM_CONFIG_U30
 u30_supported() { [ "$SIM_CONFIG_U30" = 1 ]; }
 

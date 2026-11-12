@@ -20,8 +20,8 @@ set -euo pipefail
 export PATH="$PATH:/opt/mu300/busybox-bin"
 umask 077   # the logs and markers under /run/mu300 are root's alone
 DEVICE=${MU300_DEVICE_CMD:-/opt/mu300/bin/mu300-device}
-[ -e /etc/openwrt_release ] && [ "$("$DEVICE" 2>/dev/null)" = u30air ] || {
-    echo 'Native SIM startup requires U30 Air on OpenWrt' >&2
+[ "$("$DEVICE" 2>/dev/null)" = u30air ] || {
+    echo 'Native SIM startup requires U30 Air' >&2
     exit 1
 }
 PENDING=/etc/mu300-sim-pending
@@ -117,7 +117,11 @@ fallback() {  # fallback REASON: see 2. above
         exec "$MD" radio-on
     fi
     say "nothing was sent to the radio and nr1 has no owner: the AT service starts over for SIM1"
-    setsid "$ATD_INIT" restart </dev/null >/dev/null 2>&1 &
+    if [[ -x "$ATD_INIT" ]]; then
+        setsid "$ATD_INIT" restart </dev/null >/dev/null 2>&1 &
+    else
+        systemctl restart --no-block mu300-atd.service mu300-atd2.service >/dev/null 2>&1 || true
+    fi
     exit 1
 }
 # the brokers are polled every 0.2 s (the cold start is on the dial's critical path)

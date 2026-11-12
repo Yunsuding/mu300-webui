@@ -52,7 +52,23 @@ CORE_RUNTIME_FILES = [
     ("opt-mu300/bin/u30air-wait-uplink", "/opt/mu300/bin/u30air-wait-uplink", 0o755),
     ("opt-mu300/bin/mu300-update", "/opt/mu300/bin/mu300-update", 0o755),
     ("opt-mu300/bin/mu300-extra", "/opt/mu300/bin/mu300-extra", 0o755),
+    ("opt-mu300/lib/sim-config.sh", "/opt/mu300/lib/sim-config.sh", 0o644),
+    ("opt-mu300/bin/mu300-sim", "/opt/mu300/bin/mu300-sim", 0o755),
+    ("opt-mu300/bin/mu300-sim-u30", "/opt/mu300/bin/mu300-sim-u30", 0o755),
+    ("opt-mu300/bin/mu300-sim2-start", "/opt/mu300/bin/mu300-sim2-start", 0o755),
+    ("opt-mu300/bin/mu300-sim2-warmup", "/opt/mu300/bin/mu300-sim2-warmup", 0o755),
+    ("opt-mu300/bin/mu300-sim-boot-prep", "/opt/mu300/bin/mu300-sim-boot-prep", 0o755),
+    ("opt-mu300/bin/mobile-data", "/opt/mu300/bin/mobile-data", 0o755),
+    ("opt-mu300/bin/sms", "/opt/mu300/bin/sms", 0o755),
+    ("opt-mu300/bin/mu300-ussd", "/opt/mu300/bin/mu300-ussd", 0o755),
     ("systemd/u30air-uplink-ready.service", "/etc/systemd/system/u30air-uplink-ready.service", 0o644),
+    ("systemd/mu300-atd4.service", "/etc/systemd/system/mu300-atd4.service", 0o644),
+    ("systemd/mu300-atd5.service", "/etc/systemd/system/mu300-atd5.service", 0o644),
+    ("systemd/mu300-sim-prepare.service", "/etc/systemd/system/mu300-sim-prepare.service", 0o644),
+    ("systemd/mu300-sim-warmup.service", "/etc/systemd/system/mu300-sim-warmup.service", 0o644),
+    ("systemd/mu300-atd.service.d/u30air-slot0.conf", "/etc/systemd/system/mu300-atd.service.d/u30air-slot0.conf", 0o644),
+    ("systemd/mu300-atd2.service.d/u30air-slot0.conf", "/etc/systemd/system/mu300-atd2.service.d/u30air-slot0.conf", 0o644),
+    ("systemd/mu300-mobile-data.service.d/fast-redial.conf", "/etc/systemd/system/mu300-mobile-data.service.d/fast-redial.conf", 0o644),
     ("systemd/mu300-vpn.service.d/affinity.conf", "/etc/systemd/system/mu300-vpn.service.d/affinity.conf", 0o644),
     ("systemd/mu300-vpn-subscriptions.service.d/u30air-merge.conf", "/etc/systemd/system/mu300-vpn-subscriptions.service.d/u30air-merge.conf", 0o644),
     ("systemd/mu300-vpn-subscriptions.timer.d/interval.conf", "/etc/systemd/system/mu300-vpn-subscriptions.timer.d/interval.conf", 0o644),
@@ -312,6 +328,8 @@ rm -f /etc/systemd/system/timers.target.wants/mu300-update-notice.timer
 
 systemctl daemon-reload
 systemctl restart systemd-journald 2>/dev/null || true
+systemctl enable mu300-atd4.service mu300-atd5.service mu300-sim-prepare.service mu300-sim-warmup.service 2>/dev/null || true
+if [ -x /opt/mu300/bin/mu300-sim-boot-prep ]; then /opt/mu300/bin/mu300-sim-boot-prep enable-live || true; fi
 systemctl enable u30air-webui.service mu300-power.service >/dev/null
 systemctl restart mu300-power.service
 systemctl restart u30air-webui.service

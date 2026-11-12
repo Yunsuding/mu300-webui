@@ -18,8 +18,8 @@ LED=${MU300_LED_CMD:-/opt/mu300/bin/mu300-led}
 SIM_RADIO=${MU300_SIM_RADIO_BIN:-/opt/mu300/bin/mu300-sim-radio}
 # rf_allowed SLOT: that card's radio may be on (mu300-sim-radio, FINDINGS 185; without the tool: yes)
 rf_allowed() { [ ! -x "$SIM_RADIO" ] || "$SIM_RADIO" allowed "$1" 2>/dev/null; }
-supported() { [ -e /etc/openwrt_release ] && [ "$("$DEVICE" 2>/dev/null)" = u30air ]; }
-supported || { printf '{"ok":0,"supported":0,"error":"Dual SIM control is only for the U30 Air on OpenWrt"}\n'; exit 1; }
+supported() { [ "$("$DEVICE" 2>/dev/null)" = u30air ]; }
+supported || { printf '{"ok":0,"supported":0,"error":"Dual SIM control is only for the U30 Air"}\n'; exit 1; }
 SIM_CONFIG_U30=1
 . "${MU300_SIM_CONFIG_LIB:-/opt/mu300/lib/sim-config.sh}"
 LOCKED=${MU300_SIM_LOCKED:-0}
@@ -78,8 +78,12 @@ status() {
     case "$phase" in idle|switching|waiting_for_data|rolling_back) ;; *) phase=idle;; esac
     [ ! -e "$R/sim-radio-ready" ] || radio=true
     if [ "$slot" != null ]; then
-        observed_wan=$(ubus call network.interface.wan status 2>/dev/null | tr -d ' \n\t') || observed_wan=
-        if [ -n "$observed_wan" ]; then
+        if [ -e /etc/openwrt_release ] && command -v ubus >/dev/null 2>&1; then
+            observed_wan=$(ubus call network.interface.wan status 2>/dev/null | tr -d ' \n\t') || observed_wan=
+            if [ -n "$observed_wan" ]; then
+                if wan_up; then wan=true; else wan=false; fi
+            fi
+        else
             if wan_up; then wan=true; else wan=false; fi
         fi
     fi
@@ -286,10 +290,21 @@ roll_back() {
 # data cap: netifd's autostart is off then, sim_wan_held_down) stays down, and so does the marker mobile-data's
 # `down` left (/run/mu300-mobile-data-down), which keeps its watchdog from dialling again; only a wan that was meant
 # to be up is brought up. (After kanoqwq's clean-tf-7.2 2d3b6f3f; FINDINGS 104.)
+wan_stop() {
+    if [ -e /etc/openwrt_release ] && command -v ifdown >/dev/null 2>&1; then
+        ifdown wan
+    else
+        systemctl stop mu300-mobile-data.service
+    fi
+}
 wan_back() {
     [ "$held" = 0 ] || return 0
     rm -f /run/mu300-mobile-data-down
-    ifup wan
+    if [ -e /etc/openwrt_release ] && command -v ifup >/dev/null 2>&1; then
+        ifup wan
+    else
+        systemctl restart --no-block mu300-mobile-data.service
+    fi
 }
 live_switch() {
     local target=$1 old had_data=0 rc=0 held=0
@@ -333,7 +348,7 @@ live_switch() {
     # deadline, a TERM): which card the radio is on is not known.
     trap 'atomic "$R/sim-phase" idle; rm -f "$R/sim-sequence" "$R/sim-switching"; if [ "$(cat "$R/sim-result")" = switching ]; then unknown_radio; fi' EXIT
     trap interrupt_switch INT TERM
-    ifdown wan || { atomic "$R/sim-result" failed; fail 'Cannot stop WAN'; return 1; }
+    wan_stop || { atomic "$R/sim-result" failed; fail 'Cannot stop WAN'; return 1; }
     # the network LED blinks the target card's colour, as ZTE's firmware does while it switches (FINDINGS 154);
     # the next dial's "data on" shows the card that ends up in use, a rollback's too. Cosmetic: never a failure.
     "$LED" data switching "$target" </dev/null >/dev/null 2>&1 || true
@@ -392,7 +407,7 @@ live_switch() {
         fail 'Target SIM has no data yet and the previous SIM had none either; staying on the target, boot default unchanged'; return 1
     fi
     : > "$R/sim-switching"
-    ifdown wan || true
+    wan_stop || true
     if roll_back "$old"; then
         atomic "$R/sim-result" no_data
         rm -f "$R/sim-switching"

@@ -1,0 +1,108 @@
+#!/bin/sh
+# Ubuntu 24.04 dual-SIM cold-boot preparation & zero-reboot live hot-switch enabler for ZTE U30 Air (mu300).
+# Modes:
+#   mu300-sim-boot-prep boot          run before mu300-atd* and mu300-mobile-data at cold boot
+#   mu300-sim-boot-prep wait-sbuf     wait for sbuf_5_006 (stty_nr4/nr5) readiness in /dev/sipc_sbuf
+#   mu300-sim-boot-prep enable-live   start atd4/atd5 and arm live hot-switching on an already-booted SIM1 session
+set -eu
+export PATH="$PATH:/opt/mu300/bin:/opt/mu300/busybox-bin:/usr/sbin:/sbin"
+
+DEV_BIN=${MU300_DEVICE_BIN:-/opt/mu300/bin/mu300-device}
+AT_BIN=${MU300_AT_BIN:-/opt/mu300/bin/mu300-at}
+
+is_u30air() {
+    [ -x "$DEV_BIN" ] && [ "$("$DEV_BIN" 2>/dev/null || true)" = u30air ]
+}
+
+read_slot() {
+    _s=0
+    if [ -r /etc/mu300-sim-slot ]; then
+        _v=$(tr -d ' \r\n\t' </etc/mu300-sim-slot 2>/dev/null || true)
+        case $_v in 0|1) _s=$_v ;; esac
+    fi
+    printf '%s\n' "$_s"
+}
+
+read_hot() {
+    _h=0
+    if [ -r /etc/mu300/sim-hot ]; then
+        _v=$(tr -d ' \r\n\t' </etc/mu300/sim-hot 2>/dev/null || true)
+        case $_v in 1|true|on|yes) _h=1 ;; esac
+    fi
+    printf '%s\n' "$_h"
+}
+
+cmd_boot() {
+    is_u30air || exit 0
+    mkdir -p /run/mu300 /etc/mu300
+    slot=$(read_slot)
+    hot=$(read_hot)
+    printf '%s\n' "$slot" >/run/mu300/sim-slot
+    if [ "$slot" = 1 ] || [ "$hot" = 1 ]; then
+        : >/run/mu300-radio-freeze
+        : >/run/mu300/sim-managed
+    fi
+}
+
+cmd_wait_sbuf() {
+    is_u30air || exit 0
+    end=$(( $(date +%s) + ${MU300_SBUF_WAIT:-90} ))
+    while [ "$(date +%s)" -lt "$end" ]; do
+        if [ -c /dev/stty_nr4 ] && [ -c /dev/stty_nr5 ]; then
+            if [ ! -r /dev/sipc_sbuf ] || grep -q "sbuf_5_006, state: 1," /dev/sipc_sbuf 2>/dev/null; then
+                exit 0
+            fi
+        fi
+        sleep 1
+    done
+    echo "mu300-sim-boot-prep: timed out waiting for stty_nr4/nr5 sbuf_5_006 readiness" >&2
+    exit 1
+}
+
+cmd_enable_live() {
+    is_u30air || { echo "mu300-sim-boot-prep: dual-SIM live switch is only supported on U30 Air" >&2; exit 1; }
+    mkdir -p /run/mu300 /etc/mu300
+    if [ "${1:-}" != "--no-save" ]; then
+        printf '1\n' >/etc/mu300/sim-hot
+    fi
+    if [ ! -s /run/mu300/sim-slot ]; then
+        printf '%s\n' "$(read_slot)" >/run/mu300/sim-slot
+    fi
+    systemctl daemon-reload 2>/dev/null || true
+    systemctl enable mu300-sim-prepare.service mu300-sim-warmup.service mu300-atd4.service mu300-atd5.service >/dev/null 2>&1 || true
+    systemctl start mu300-atd4.service mu300-atd5.service
+
+    end=$(( $(date +%s) + 20 ))
+    while [ "$(date +%s)" -lt "$end" ]; do
+        if [ -p /run/mu300-at/cmd ] && [ -p /run/mu300-at2/cmd ] && [ -p /run/mu300-at4/cmd ] && [ -p /run/mu300-at5/cmd ]; then
+            break
+        fi
+        sleep 1
+    done
+    for p in /run/mu300-at/cmd /run/mu300-at2/cmd /run/mu300-at4/cmd /run/mu300-at5/cmd; do
+        [ -p "$p" ] || { echo "mu300-sim-boot-prep: broker pipe missing: $p" >&2; exit 1; }
+    done
+
+    cur=$(tr -d ' \r\n\t' </run/mu300/sim-slot 2>/dev/null || echo 0)
+    adir=/run/mu300-at
+    [ "$cur" = 1 ] && adir=/run/mu300-at4
+    cfun=$(MU300_AT_DIR="$adir" "$AT_BIN" -t 4 'AT+CFUN?' 2>/dev/null | tr -d '\r' || true)
+    case $cfun in
+        *"+CFUN: 1"*)
+            : >/run/mu300-radio-freeze
+            : >/run/mu300/sim-managed
+            : >/run/mu300/sim-radio-ready
+            : >/run/mu300-ril-handshake
+            ;;
+    esac
+    if [ -x /opt/mu300/bin/mu300-sim ]; then
+        /opt/mu300/bin/mu300-sim status --json
+    fi
+}
+
+case ${1:-} in
+    boot) cmd_boot ;;
+    wait-sbuf) cmd_wait_sbuf ;;
+    enable-live) shift; cmd_enable_live "$@" ;;
+    *) echo "usage: $0 boot | wait-sbuf | enable-live [--no-save]" >&2; exit 2 ;;
+esac

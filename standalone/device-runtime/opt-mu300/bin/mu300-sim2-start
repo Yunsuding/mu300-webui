@@ -12,8 +12,8 @@ set -euo pipefail
 export PATH="$PATH:/opt/mu300/busybox-bin"
 umask 077   # the logs and markers under /run/mu300 are root's alone
 DEVICE=${MU300_DEVICE_CMD:-/opt/mu300/bin/mu300-device}
-[ -e /etc/openwrt_release ] && [ "$("$DEVICE" 2>/dev/null)" = u30air ] || {
-    echo 'Native SIM startup requires U30 Air on OpenWrt' >&2
+[ "$("$DEVICE" 2>/dev/null)" = u30air ] || {
+    echo 'Native SIM startup requires U30 Air' >&2
     exit 1
 }
 [[ ${1:-} == --cold-start ]] || { echo 'Requires an explicitly prepared cold-start boot.' >&2; exit 2; }

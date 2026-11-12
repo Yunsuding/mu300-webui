@@ -26,12 +26,30 @@ set -euo pipefail
 # They are taken out of it before anything is started, so that no child of this script (mu300-at, mu300-sim, the LED,
 # the VPN guard, a hook) has them in its own; and without a trace, should somebody run this with bash -x.
 case $- in *x*) set +x; APN_XTRACE=1 ;; *) APN_XTRACE= ;; esac
-# Ubuntu's settings file. systemd hands it to the two services as their environment, but not every dial starts
-# there: mu300-power's "mobile-data resume" and a command run by hand have no such environment, and used to dial
-# without the APN - with credentials that would be a dial without them. So whatever the environment does not say is
-# read from the file here, by every run, the same way: KEY=VALUE lines as systemd reads them (the last one of a key,
-# quotes around the value taken off), never executed. Not under netifd, whose settings come from mu300cell.sh.
-MD_CONF=${MU300_CONF:-/etc/mu300/mobile-data.conf}
+# Physical SIM/RIL group selection
+# 0 = slot0: nr0/nr1/nr2
+# 1 = slot1: nr3/nr4/nr5
+SIM_SLOT=${MU300_SIM_SLOT:-0}
+[ ! -x /opt/mu300/bin/mu300-sim ] || SIM_SLOT=$(/opt/mu300/bin/mu300-sim active) || exit 1
+SIM_NATIVE=0
+[ ! -e /run/mu300-radio-freeze ] || SIM_NATIVE=1
+
+md_conf_for_slot() {
+    if [ -n "${MU300_CONF:-}" ]; then
+        printf '%s\n' "$MU300_CONF"
+    elif [ "${1:-0}" = 1 ]; then
+        printf '%s\n' /etc/mu300/mobile-data-sim2.conf
+    else
+        printf '%s\n' /etc/mu300/mobile-data.conf
+    fi
+}
+
+# Ubuntu's settings file. systemd hands mobile-data.conf (SIM 1) to the service environment; when active slot is SIM 2
+# under systemd without an explicit MU300_CONF override, clear inherited SIM 1 APN variables before reading SIM 2's file.
+MD_CONF=$(md_conf_for_slot "$SIM_SLOT")
+if [ "$SIM_SLOT" = 1 ] && [ -z "${MU300_CONF:-}" ] && [ -n "${INVOCATION_ID:-}" ] && [ "${MU300_NETIFD:-}" != 1 ]; then
+    unset MU300_APN MU300_PDP_TYPE MU300_APN_USER MU300_APN_PASSWORD MU300_APN_AUTH MU300_APN_ICCID
+fi
 if [ "${MU300_NETIFD:-}" != 1 ] && [ -f "$MD_CONF" ] && [ -r "$MD_CONF" ]; then
     for _k in MU300_APN MU300_PDP_TYPE MU300_APN_USER MU300_APN_PASSWORD MU300_APN_AUTH MU300_APN_ICCID; do
         [ -z "${!_k+x}" ] || continue                                # the environment says it
@@ -50,16 +68,6 @@ APN_SET_USER=${MU300_APN_USER:-}; APN_SET_PASS=${MU300_APN_PASSWORD:-}; APN_SET_
 APN_SET_ICCID=${MU300_APN_ICCID:-}
 unset MU300_APN_USER MU300_APN_PASSWORD
 [ -z "$APN_XTRACE" ] || set -x
-
-# Physical SIM/RIL group selection
-# 0 = slot0: nr0/nr1/nr2
-# 1 = slot1: nr3/nr4/nr5
-# /run/mu300/sim-slot is this boot's pin, written by init.d/mu300-atd on the U30 Air (OpenWrt) alone: the saved
-# choice (/etc/mu300-sim-slot) is never read here, so a stray file on another device or system changes nothing.
-SIM_SLOT=${MU300_SIM_SLOT:-0}
-[ ! -x /opt/mu300/bin/mu300-sim ] || SIM_SLOT=$(/opt/mu300/bin/mu300-sim active) || exit 1
-SIM_NATIVE=0
-[ ! -e /run/mu300-radio-freeze ] || SIM_NATIVE=1
 
 case "$SIM_SLOT:$SIM_NATIVE" in
     0:*|1:0)
@@ -729,21 +737,22 @@ roaming_word() {
 }
 # roaming_option SLOT: the card's uci option
 roaming_option() { if [ "$1" = 1 ]; then echo roaming_internal; else echo roaming; fi; }
-# conf_value KEY: the last KEY=VALUE line of Ubuntu's settings file, quotes taken off (read, never executed)
+# conf_value KEY [FILE]: the last KEY=VALUE line of Ubuntu's settings file, quotes taken off (read, never executed)
 conf_value() {
-    local v
-    [ -r "$MD_CONF" ] || return 0
-    v=$(sed -n "s/^[[:space:]]*$1=//p" "$MD_CONF" 2>/dev/null | tail -n 1)
+    local v f=${2:-$MD_CONF}
+    [ -r "$f" ] || return 0
+    v=$(sed -n "s/^[[:space:]]*$1=//p" "$f" 2>/dev/null | tail -n 1)
     v=${v%$'\r'}
     case $v in \"*\") v=${v#\"}; v=${v%\"} ;; \'*\') v=${v#\'}; v=${v%\'} ;; esac
     printf '%s\n' "$v"
 }
 # roaming_raw [SLOT]: the stored value as it is
 roaming_raw() {
+    local s=${1:-$SIM_SLOT}
     if via_netifd; then
-        uci -q get "network.${MU300_WAN:-wan}.$(roaming_option "${1:-$SIM_SLOT}")" 2>/dev/null || true
+        uci -q get "network.${MU300_WAN:-wan}.$(roaming_option "$s")" 2>/dev/null || true
     else
-        conf_value MU300_DATA_ROAMING
+        conf_value MU300_DATA_ROAMING "$(md_conf_for_slot "$s")"
     fi
 }
 # roaming_setting [SLOT]: 1 when data may be used while roaming, 0 when not
@@ -1846,33 +1855,34 @@ status() {
 #   roaming on|off    allow or refuse data while roaming: the card in use, or --slot N (OpenWrt: one setting per
 #                     card; Ubuntu: one for both). Taken up by the dial and the watchdog within half a minute.
 roaming_json() {
-    local held=false per=false s0 s1
+    local held=false per=true s0 s1
     [ ! -e "$ROAM_HELD" ] || held=true
-    via_netifd && per=true
     s0=$(roaming_setting 0); s1=$(roaming_setting 1)
     tf() { if [ "$1" = 1 ]; then echo true; else echo false; fi; }
     printf '{"allowed":%s,"held":%s,"slot":%d,"per_sim":%s,"slots":[%s,%s]}\n' "$(tf "$(roaming_setting)")" "$held" \
         "$SIM_SLOT" "$per" "$(tf "$s0")" "$(tf "$s1")"
 }
-# roaming_write 0|1 SLOT: store the setting (uci on OpenWrt; Ubuntu's settings file, root's alone as it may hold the
-# APN password, its other lines kept, a new file renamed over the old one)
+# roaming_write 0|1 SLOT: store the setting (uci on OpenWrt; Ubuntu's per-slot settings file, root's alone as it may
+# hold the APN password, its other lines kept, a new file renamed over the old one)
 roaming_write() {
     if via_netifd; then
         uci -q set "network.${MU300_WAN:-wan}.$(roaming_option "$2")=$1" && uci -q commit network
         return
     fi
-    local d=${MD_CONF%/*} t
+    local target_conf d t
+    target_conf=$(md_conf_for_slot "${2:-$SIM_SLOT}")
+    d=${target_conf%/*}
     mkdir -p "$d" 2>/dev/null || return 1
     t=$(umask 077; mktemp "$d/.mobile-data.conf.XXXXXX" 2>/dev/null) || return 1
-    if { if [ -f "$MD_CONF" ]; then grep -v '^[[:space:]]*MU300_DATA_ROAMING=' "$MD_CONF" || true; fi
-         echo "MU300_DATA_ROAMING=$1"; } > "$t" && chmod 600 "$t" && mv -f "$t" "$MD_CONF"; then
+    if { if [ -f "$target_conf" ]; then grep -v '^[[:space:]]*MU300_DATA_ROAMING=' "$target_conf" || true; fi
+         echo "MU300_DATA_ROAMING=$1"; } > "$t" && chmod 600 "$t" && mv -f "$t" "$target_conf"; then
         return 0
     fi
     rm -f "$t"
     return 1
 }
 roaming_cmd() {
-    local v slot=$SIM_SLOT net
+    local v slot=$SIM_SLOT has_slot=0 net
     case ${1:-} in
         '')
             if [ "$(roaming_setting)" = 1 ]; then echo "data roaming   allowed"; else echo "data roaming   off"; fi
@@ -1891,13 +1901,12 @@ roaming_cmd() {
         on|off)
             v=$(roaming_word "$1")
             if [ "${2:-}" = --slot ]; then
-                case ${3:-} in 0|1) slot=$3 ;; *) echo "usage: $0 roaming on|off [--slot 0|1]" >&2; return 2 ;; esac
-                via_netifd || { echo "Ubuntu has one data roaming setting for both cards: no --slot" >&2; return 2; }
+                case ${3:-} in 0|1) slot=$3; has_slot=1 ;; *) echo "usage: $0 roaming on|off [--slot 0|1]" >&2; return 2 ;; esac
             elif [ -n "${2:-}" ]; then
                 echo "usage: $0 roaming on|off [--slot 0|1]" >&2; return 2
             fi
             roaming_write "$v" "$slot" || { echo "the data roaming setting could not be saved" >&2; return 1; }
-            if via_netifd; then echo "data roaming $1 for the SIM in slot $slot"; else echo "data roaming $1"; fi
+            if via_netifd || [ "$has_slot" = 1 ]; then echo "data roaming $1 for the SIM in slot $slot"; else echo "data roaming $1"; fi
             ;;
         *) echo "usage: $0 roaming [--json] | roaming on|off [--slot 0|1]" >&2; return 2 ;;
     esac

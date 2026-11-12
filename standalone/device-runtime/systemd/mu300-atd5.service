@@ -1,0 +1,20 @@
+[Unit]
+Description=MU300 modem AT channel keeper for SIM2 data channel (nr5)
+ConditionPathExists=/dev/stty_nr5
+After=mu300-vendor.service mu300-sim-prepare.service
+Wants=mu300-vendor.service
+StartLimitIntervalSec=0
+
+[Service]
+Environment=MU300_AT_ROLE=data
+Environment=MU300_AT_DEV=/dev/stty_nr5
+Environment=MU300_AT_DIR=/run/mu300-at5
+Environment=MU300_AT_URC_CHANNELS=
+Environment=MU300_AT_LIVE_URC_LOG=/run/mu300-at/urc/stty_nr0.log
+ExecStartPre=/opt/mu300/bin/mu300-sim-boot-prep wait-sbuf
+ExecStart=/opt/mu300/bin/mu300-atd
+Restart=always
+RestartSec=10
+
+[Install]
+WantedBy=multi-user.target
