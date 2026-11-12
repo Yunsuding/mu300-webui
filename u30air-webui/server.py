@@ -5580,7 +5580,14 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 self.send_json(sim_comm_resp)
                 return
 
+            nfc_resp = handle_nfc_api(method, req_data)
+            if nfc_resp is not None:
+                self.send_json(nfc_resp)
+                return
+
             resp = run_mu300_api(method, req_data)
+            if method == "wifi.set" and isinstance(resp, dict) and resp.get("ok"):
+                trigger_nfc_wifi_sync_async()
             if method.startswith("power.") or method.startswith("wifi.") or method.startswith("vpn."):
                 BATTERY_INFO_CACHE["time"] = 0
                 OVERVIEW_API_CACHE["time"] = 0
@@ -5600,10 +5607,277 @@ class WebUIHandler(BaseHTTPRequestHandler):
     def log_message(self, format, *args):
         pass
 
+# =========================================================================
+# NFC 标签 (FM11NT08 / I2C-2 0x57) 状态读取、射频开关与 Wi-Fi 自动同步
+# =========================================================================
+NFC_BIN = "/opt/mu300/bin/mu300-nfc"
+HOTSPOT_CONF_PATH = "/etc/mu300/hotspot.conf"
+I2C_MODULES_LOAD_CONF = "/etc/modules-load.d/mu300-i2c.conf"
+NFC_LOCK = threading.Lock()
+NFC_STATUS_CACHE = {"time": 0, "data": None}
+_NFC_SUPPORTED_CACHE = None
+
+def _ensure_i2c_dev_ready():
+    """确保 Linux i2c-dev 模块已加载且开机自动加载，避免 5.4 内核缺失 /dev/i2c-2"""
+    if not sys.platform.startswith("linux"):
+        return
+    try:
+        if os.path.isdir("/etc/modules-load.d") and not os.path.exists(I2C_MODULES_LOAD_CONF):
+            _atomic_write_text(I2C_MODULES_LOAD_CONF, "i2c-dev\n", mode=0o644)
+    except Exception:
+        pass
+    if not os.path.exists("/dev/i2c-2"):
+        for modprobe_bin in ("/sbin/modprobe", "/usr/sbin/modprobe", "modprobe"):
+            try:
+                subprocess.run([modprobe_bin, "i2c-dev"], capture_output=True, timeout=5)
+                if os.path.exists("/dev/i2c-2"):
+                    break
+            except Exception:
+                continue
+
+def _read_current_hotspot_ssid():
+    try:
+        if os.path.exists(HOTSPOT_CONF_PATH):
+            with open(HOTSPOT_CONF_PATH, "r", encoding="utf-8", errors="ignore") as f:
+                for line in f:
+                    if line.startswith("SSID="):
+                        return line.split("=", 1)[1].rstrip("\r\n")
+    except Exception:
+        pass
+    return ""
+
+def _parse_nfc_status_output(stdout_text, hotspot_ssid=""):
+    lines = [ln.strip() for ln in (stdout_text or "").splitlines() if ln.strip()]
+    first = lines[0] if lines else "empty"
+    rf_on = not any("NFC is off" in ln for ln in lines)
+    mode = "other"
+    wifi_ssid = ""
+    wifi_encrypted = False
+    value = ""
+    summary = first
+
+    if first.startswith("wifi: "):
+        mode = "wifi"
+        rest = first[6:]
+        if rest.endswith(" (with its password)"):
+            wifi_ssid = rest[:-20]
+            wifi_encrypted = True
+            summary = f"Wi-Fi 一碰连：{wifi_ssid}（含密码）"
+        elif rest.endswith(" (open)"):
+            wifi_ssid = rest[:-7]
+            wifi_encrypted = False
+            summary = f"Wi-Fi 一碰连：{wifi_ssid}（开放免密）"
+        else:
+            wifi_ssid = rest
+            summary = f"Wi-Fi 一碰连：{wifi_ssid}"
+    elif first.startswith("url: "):
+        mode = "url"
+        value = first[5:]
+        summary = f"网址链接：{value}"
+    elif first.startswith("text: "):
+        mode = "text"
+        value = first[6:]
+        summary = f"纯文本：{value}"
+    elif first in ("empty", "no NDEF message"):
+        mode = "empty"
+        summary = "空白标签（尚未写入数据）"
+    elif first.startswith("other: "):
+        mode = "other"
+        value = first[7:]
+        summary = f"自定义记录（{value}）"
+
+    in_sync = bool(mode == "wifi" and hotspot_ssid and wifi_ssid == hotspot_ssid)
+    return {
+        "ok": 1,
+        "supported": True,
+        "enabled": rf_on,
+        "mode": mode,
+        "raw": first,
+        "summary": summary,
+        "wifi_ssid": wifi_ssid,
+        "wifi_encrypted": wifi_encrypted,
+        "hotspot_ssid": hotspot_ssid,
+        "in_sync": in_sync,
+        "value": value,
+    }
+
+def _is_nfc_supported():
+    global _NFC_SUPPORTED_CACHE
+    if _NFC_SUPPORTED_CACHE is not None:
+        return _NFC_SUPPORTED_CACHE
+    if not os.path.exists(NFC_BIN):
+        _NFC_SUPPORTED_CACHE = False
+        return False
+    try:
+        proc = subprocess.run([NFC_BIN, "supported"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=5)
+        _NFC_SUPPORTED_CACHE = (proc.returncode == 0)
+    except Exception:
+        _NFC_SUPPORTED_CACHE = False
+    return _NFC_SUPPORTED_CACHE
+
+def get_nfc_status(force=False):
+    now = time.time()
+    if not force and NFC_STATUS_CACHE["data"] and (now - NFC_STATUS_CACHE["time"] < 120):
+        cached = dict(NFC_STATUS_CACHE["data"])
+        cur_ssid = _read_current_hotspot_ssid()
+        cached["hotspot_ssid"] = cur_ssid
+        cached["in_sync"] = bool(cached.get("mode") == "wifi" and cur_ssid and cached.get("wifi_ssid") == cur_ssid)
+        return cached
+
+    if not _is_nfc_supported():
+        return {
+            "ok": 1,
+            "supported": False,
+            "enabled": False,
+            "mode": "unsupported",
+            "summary": "当前设备未检测到可编程 NFC 标签芯片",
+            "hotspot_ssid": _read_current_hotspot_ssid(),
+            "in_sync": False,
+            "value": "",
+        }
+
+    if not NFC_LOCK.acquire(timeout=6.0):
+        if NFC_STATUS_CACHE["data"]:
+            return dict(NFC_STATUS_CACHE["data"])
+        return {"ok": 0, "error": "NFC 芯片正在读写中，请稍后重试"}
+
+    try:
+        _ensure_i2c_dev_ready()
+        proc = subprocess.run([NFC_BIN, "status"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8)
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            return {"ok": 0, "supported": True, "error": f"读取 NFC 芯片失败: {err or f'exit {proc.returncode}'}"}
+        parsed = _parse_nfc_status_output(proc.stdout, _read_current_hotspot_ssid())
+        NFC_STATUS_CACHE["data"] = dict(parsed)
+        NFC_STATUS_CACHE["time"] = time.time()
+        return parsed
+    except Exception as e:
+        return {"ok": 0, "supported": True, "error": f"读取 NFC 异常: {e}"}
+    finally:
+        NFC_LOCK.release()
+
+def set_nfc_rf_power(enable):
+    if not _is_nfc_supported():
+        return {"ok": 0, "error": "当前设备不支持可编程 NFC"}
+    target = "on" if bool(enable) else "off"
+    if not NFC_LOCK.acquire(timeout=6.0):
+        return {"ok": 0, "error": "NFC 芯片忙，请稍后重试"}
+    parsed = None
+    try:
+        _ensure_i2c_dev_ready()
+        proc = subprocess.run([NFC_BIN, target], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8)
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            return {"ok": 0, "error": f"切换 NFC 射频失败: {err or f'exit {proc.returncode}'}"}
+        proc_st = subprocess.run([NFC_BIN, "status"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8)
+        if proc_st.returncode == 0:
+            parsed = _parse_nfc_status_output(proc_st.stdout, _read_current_hotspot_ssid())
+            NFC_STATUS_CACHE["data"] = dict(parsed)
+            NFC_STATUS_CACHE["time"] = time.time()
+        else:
+            NFC_STATUS_CACHE["time"] = 0
+    except Exception as e:
+        return {"ok": 0, "error": f"切换 NFC 异常: {e}"}
+    finally:
+        NFC_LOCK.release()
+
+    msg = "NFC 射频已开启（手机贴近机身即可感应）" if target == "on" else "NFC 射频已关闭（防他人贴近蹭网）"
+    return {"ok": 1, "msg": msg, "status": parsed or get_nfc_status(force=True)}
+
+def write_nfc_payload(mode, value=""):
+    if not _is_nfc_supported():
+        return {"ok": 0, "error": "当前设备不支持可编程 NFC"}
+    mode = str(mode or "").strip().lower()
+    val = str(value or "").strip()
+
+    if mode in ("wifi", "sync"):
+        cmd = [NFC_BIN, mode]
+        ok_msg = "已将当前 Wi-Fi 名称与密码同步写入 NFC 芯片"
+    elif mode == "clear":
+        cmd = [NFC_BIN, "clear"]
+        ok_msg = "NFC 标签内容已清空"
+    elif mode == "url":
+        if not val or not re.match(r"^(https?://|tel:|mailto:)", val, re.I):
+            return {"ok": 0, "error": "请输入以 https://、http://、tel: 或 mailto: 开头的有效链接"}
+        if len(val) > 512 or any(c in val for c in ("\r", "\n", "\x00")):
+            return {"ok": 0, "error": "链接长度超限或包含非法控制字符"}
+        cmd = [NFC_BIN, "url", val]
+        ok_msg = "已将自定义网址写入 NFC 芯片（安卓与 iPhone 均可一碰打开）"
+    elif mode == "text":
+        if not val:
+            return {"ok": 0, "error": "请输入要写入标签的文本内容"}
+        if len(val.encode("utf-8")) > 512 or "\x00" in val:
+            return {"ok": 0, "error": "文本长度超过 NFC 标签容量上限"}
+        cmd = [NFC_BIN, "text", val]
+        ok_msg = "已将纯文本内容写入 NFC 芯片"
+    else:
+        return {"ok": 0, "error": f"不支持的 NFC 写入模式: {mode}"}
+
+    if not NFC_LOCK.acquire(timeout=8.0):
+        return {"ok": 0, "error": "NFC 芯片忙，请稍后重试"}
+    parsed = None
+    try:
+        _ensure_i2c_dev_ready()
+        proc = subprocess.run(cmd, capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+        if proc.returncode != 0:
+            err = (proc.stderr or proc.stdout or "").strip()
+            return {"ok": 0, "error": f"NFC 写入失败: {err or f'exit {proc.returncode}'}"}
+        proc_st = subprocess.run([NFC_BIN, "status"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8)
+        if proc_st.returncode == 0:
+            parsed = _parse_nfc_status_output(proc_st.stdout, _read_current_hotspot_ssid())
+            NFC_STATUS_CACHE["data"] = dict(parsed)
+            NFC_STATUS_CACHE["time"] = time.time()
+        else:
+            NFC_STATUS_CACHE["time"] = 0
+    except Exception as e:
+        return {"ok": 0, "error": f"NFC 写入异常: {e}"}
+    finally:
+        NFC_LOCK.release()
+
+    return {"ok": 1, "msg": ok_msg, "status": parsed or get_nfc_status(force=True)}
+
+def trigger_nfc_wifi_sync_async(delay_sec=3.0):
+    """热点配置更新后延迟兜底同步 NFC 标签，与 hotspot-start 形成双保险且用 NFC_LOCK 防并发竞争"""
+    NFC_STATUS_CACHE["time"] = 0
+    def _worker():
+        time.sleep(max(0.5, float(delay_sec)))
+        if not _is_nfc_supported():
+            return
+        if not NFC_LOCK.acquire(timeout=8.0):
+            return
+        try:
+            _ensure_i2c_dev_ready()
+            subprocess.run([NFC_BIN, "sync"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=12)
+            proc_st = subprocess.run([NFC_BIN, "status"], capture_output=True, text=True, encoding="utf-8", errors="replace", timeout=8)
+            if proc_st.returncode == 0:
+                NFC_STATUS_CACHE["data"] = _parse_nfc_status_output(proc_st.stdout, _read_current_hotspot_ssid())
+                NFC_STATUS_CACHE["time"] = time.time()
+        except Exception as e:
+            print(f"[NFC Sync] {e}")
+        finally:
+            NFC_LOCK.release()
+    threading.Thread(target=_worker, daemon=True).start()
+
+def handle_nfc_api(method, req_data):
+    req_data = req_data if isinstance(req_data, dict) else {}
+    if method == "nfc.status":
+        return get_nfc_status(force=bool(req_data.get("force", False)))
+    if method == "nfc.toggle":
+        if "enable" in req_data:
+            desired = bool(req_data["enable"])
+        else:
+            cur = get_nfc_status(force=False)
+            desired = not bool(cur.get("enabled", True))
+        return set_nfc_rf_power(desired)
+    if method == "nfc.write":
+        return write_nfc_payload(req_data.get("mode", "wifi"), req_data.get("value", ""))
+    return None
+
 def main():
     print(f"[*] 启动 U30 Air 极轻量 Web 控制台服务 (带身份鉴权与日志守护)...")
     print(f"[*] 静态文件根目录: {WEB_DIR}")
     print(f"[*] 监听端口: {PORT}")
+    _ensure_i2c_dev_ready()
     update_public_ip_async()
     start_log_guardian()
     start_comm_and_quota_watcher()

@@ -168,11 +168,12 @@ echo "[6/6] Enabling Dual-SIM AT brokers (if standalone runtime is present) and 
 RT_DIR="${SCRIPT_DIR}/standalone/device-runtime"
 if [[ -d "${RT_DIR}" ]]; then
   install -D -o root -g root -m 644 "${RT_DIR}/opt-mu300/lib/sim-config.sh" /opt/mu300/lib/sim-config.sh
-  for b in mu300-api mu300-sim mu300-sim-u30 mu300-sim2-start mu300-sim2-warmup mu300-sim-boot-prep mobile-data sms mu300-ussd; do
+  for b in mu300-api mu300-nfc mu300-sim mu300-sim-u30 mu300-sim2-start mu300-sim2-warmup mu300-sim-boot-prep mobile-data sms mu300-ussd; do
     if [[ -f "${RT_DIR}/opt-mu300/bin/${b}" ]]; then
       install -D -o root -g root -m 755 "${RT_DIR}/opt-mu300/bin/${b}" "/opt/mu300/bin/${b}"
     fi
   done
+  ln -sf /opt/mu300/bin/mu300-nfc /usr/local/bin/mu300-nfc 2>/dev/null || true
   for u in mu300-atd4.service mu300-atd5.service mu300-sim-prepare.service mu300-sim-warmup.service; do
     if [[ -f "${RT_DIR}/systemd/${u}" ]]; then
       install -D -o root -g root -m 644 "${RT_DIR}/systemd/${u}" "/etc/systemd/system/${u}"
@@ -181,6 +182,12 @@ if [[ -d "${RT_DIR}" ]]; then
   install -D -o root -g root -m 644 "${RT_DIR}/systemd/mu300-atd.service.d/u30air-slot0.conf" /etc/systemd/system/mu300-atd.service.d/u30air-slot0.conf
   install -D -o root -g root -m 644 "${RT_DIR}/systemd/mu300-atd2.service.d/u30air-slot0.conf" /etc/systemd/system/mu300-atd2.service.d/u30air-slot0.conf
   install -D -o root -g root -m 644 "${RT_DIR}/systemd/mu300-mobile-data.service.d/fast-redial.conf" /etc/systemd/system/mu300-mobile-data.service.d/fast-redial.conf
+fi
+mkdir -p /etc/modules-load.d
+printf 'i2c-dev\n' > /etc/modules-load.d/mu300-i2c.conf
+modprobe i2c-dev 2>/dev/null || true
+if [[ -x /opt/mu300/bin/mu300-nfc ]] && /opt/mu300/bin/mu300-nfc supported 2>/dev/null; then
+  /opt/mu300/bin/mu300-nfc sync >/dev/null 2>&1 || true
 fi
 cp -f "${SRC_DIR}/service/u30air-webui.service" /etc/systemd/system/u30air-webui.service
 systemctl daemon-reload

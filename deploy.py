@@ -127,6 +127,7 @@ def deploy(target_host: str = None, check_only: bool = False, with_runtime: bool
 
         runtime_sync_list = [
             (RUNTIME_BASE / "opt-mu300/bin/mu300-sqc-charge", "/opt/mu300/bin/mu300-sqc-charge", "755"),
+            (RUNTIME_BASE / "opt-mu300/bin/mu300-nfc", "/opt/mu300/bin/mu300-nfc", "755"),
             (RUNTIME_BASE / "opt-mu300/bin/mu300-power", "/opt/mu300/bin/mu300-power", "755"),
             (RUNTIME_BASE / "opt-mu300/bin/mu300-api", "/opt/mu300/bin/mu300-api", "755"),
             (RUNTIME_BASE / "opt-mu300/bin/lan-start", "/opt/mu300/bin/lan-start", "755"),

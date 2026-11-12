@@ -1308,6 +1308,49 @@
           </div>
         </div>
       </div>
+
+      <!-- NFC 一碰连与双界面标签管理卡片 (FM11NT08) -->
+      <div id="nfc-manage-card" class="glass-card rounded-2xl p-5 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+          <div class="flex flex-wrap items-center gap-2">
+            <h3 class="font-semibold text-white">📳 NFC 一碰连与标签管理 <span class="text-xs font-normal text-slate-400">(FM11NT08)</span></h3>
+            <span id="nfc-sync-badge" class="px-2 py-0.5 rounded text-[11px] font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">读取中...</span>
+          </div>
+          <div class="flex items-center gap-2">
+            <button onclick="loadNfcStatus(true)" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 text-xs transition">刷新读取</button>
+            <button onclick="toggleNfcPower()" id="btn-nfc-toggle" data-enabled="true" class="px-3 py-1 rounded-lg bg-emerald-500 text-black font-semibold text-xs transition">NFC 已开启</button>
+          </div>
+        </div>
+
+        <div class="grid grid-cols-1 lg:grid-cols-2 gap-5 text-xs">
+          <div class="space-y-3">
+            <div class="p-3.5 rounded-xl bg-slate-900/90 border border-slate-800 space-y-1.5">
+              <div class="text-[11px] text-slate-400">当前主板 NFC 芯片存储内容</div>
+              <div id="nfc-summary-text" class="text-sm font-semibold text-cyan-300 break-all">正在读取芯片...</div>
+              <div id="nfc-rf-hint" class="text-[11px] text-slate-400">修改上方热点名称或密码后将自动同步至芯片（公共场合可关闭右上角 NFC 射频防蹭网）</div>
+            </div>
+            <div class="flex flex-wrap gap-2">
+              <button onclick="writeNfcTag('wifi')" class="flex-1 min-w-[160px] py-2 px-3 bg-cyan-600 hover:bg-cyan-500 text-black font-bold rounded-xl transition">📡 写入当前 Wi-Fi 一碰连</button>
+              <button onclick="writeNfcTag('clear')" class="py-2 px-3.5 bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 rounded-xl transition">清空标签</button>
+            </div>
+            <div class="text-[11px] text-slate-500 leading-relaxed">
+              注：安卓 / 鸿蒙手机解锁贴近机身可直接弹窗免密连 Wi-Fi；苹果 iPhone 因 iOS 限制不响应 WSC Wi-Fi 标签，但支持右侧「网址链接」一碰弹窗打开网页。
+            </div>
+          </div>
+
+          <div class="space-y-3 p-3.5 rounded-xl bg-slate-900/50 border border-slate-800/80">
+            <div class="font-medium text-slate-200">自定义写入网址 / 文本记录 <span class="text-[11px] font-normal text-slate-400">(写入网址后改 Wi-Fi 不会覆盖它)</span></div>
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-2">
+              <select id="nfc-custom-mode" onchange="onNfcCustomModeChange()" class="bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+                <option value="url">网址链接 (URL)</option>
+                <option value="text">纯文本 (Text)</option>
+              </select>
+              <input type="text" id="nfc-custom-val" placeholder="如 http://192.168.78.1:8080/ 或 https://..." class="sm:col-span-2 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+            </div>
+            <button onclick="writeNfcCustom()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold rounded-xl transition">写入自定义 NFC 内容</button>
+          </div>
+        </div>
+      </div>
     </section>
 
     <!-- ========================================================================= -->
@@ -4862,6 +4905,7 @@
 
     async function loadWifiTab() {
       fetchWifiClients();
+      loadNfcStatus(false);
       const res = await apiCall('wifi.get');
       if (res && res.ok) {
         if (document.getElementById('wifi-ssid')) document.getElementById('wifi-ssid').value = res.ssid || 'U30Air_5G';
@@ -4876,6 +4920,119 @@
       }
     }
 
+    function renderNfcStatus(st) {
+      if (!st) return;
+      const card = document.getElementById('nfc-manage-card');
+      if (st.supported === false) {
+        if (card) card.classList.add('hidden');
+        return;
+      }
+      if (card) card.classList.remove('hidden');
+
+      const summaryEl = document.getElementById('nfc-summary-text');
+      const hintEl = document.getElementById('nfc-rf-hint');
+      const syncBadge = document.getElementById('nfc-sync-badge');
+      const toggleBtn = document.getElementById('btn-nfc-toggle');
+
+      if (summaryEl) summaryEl.innerText = st.summary || st.raw || '--';
+      const rfOn = !!st.enabled;
+      if (toggleBtn) {
+        toggleBtn.dataset.enabled = rfOn ? 'true' : 'false';
+        toggleBtn.innerText = rfOn ? 'NFC 射频已开启' : 'NFC 射频已关闭';
+        toggleBtn.className = rfOn
+          ? 'px-3 py-1 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition'
+          : 'px-3 py-1 rounded-lg bg-slate-800 hover:bg-slate-700 text-slate-400 font-semibold text-xs border border-slate-700 transition';
+      }
+      if (hintEl) {
+        hintEl.innerText = rfOn
+          ? '当前射频已开启：手机贴近机身即可读取标签（修改热点名称或密码后自动同步）'
+          : '当前射频已静默关闭：手机贴近无任何响应（防公共场合他人碰机连网）';
+      }
+      if (syncBadge) {
+        if (st.mode === 'wifi' && st.in_sync) {
+          syncBadge.innerText = '已同步当前热点';
+          syncBadge.className = 'px-2 py-0.5 rounded text-[11px] font-medium bg-emerald-500/10 text-emerald-400 border border-emerald-500/20';
+        } else if (st.mode === 'wifi') {
+          syncBadge.innerText = 'Wi-Fi 一碰连模式';
+          syncBadge.className = 'px-2 py-0.5 rounded text-[11px] font-medium bg-cyan-500/10 text-cyan-400 border border-cyan-500/20';
+        } else if (st.mode === 'url' || st.mode === 'text') {
+          syncBadge.innerText = st.mode === 'url' ? '自定义网址模式' : '纯文本模式';
+          syncBadge.className = 'px-2 py-0.5 rounded text-[11px] font-medium bg-amber-500/10 text-amber-300 border border-amber-500/20';
+          const modeSel = document.getElementById('nfc-custom-mode');
+          const valInput = document.getElementById('nfc-custom-val');
+          if (modeSel) modeSel.value = st.mode;
+          if (valInput && st.value && !valInput.value) valInput.value = st.value;
+        } else {
+          syncBadge.innerText = '空白标签';
+          syncBadge.className = 'px-2 py-0.5 rounded text-[11px] font-medium bg-slate-800 text-slate-400 border border-slate-700';
+        }
+      }
+    }
+
+    async function loadNfcStatus(force = false) {
+      const res = await apiCall('nfc.status', { force });
+      if (res && res.ok) {
+        renderNfcStatus(res);
+      } else if (res && res.error) {
+        const summaryEl = document.getElementById('nfc-summary-text');
+        if (summaryEl) summaryEl.innerText = res.error;
+        if (force) showToast(res.error, false);
+      }
+    }
+
+    async function toggleNfcPower() {
+      const btn = document.getElementById('btn-nfc-toggle');
+      const curOn = btn ? btn.dataset.enabled === 'true' : true;
+      const desired = !curOn;
+      showToast(desired ? '正在开启 NFC 射频...' : '正在关闭 NFC 射频...');
+      const res = await apiCall('nfc.toggle', { enable: desired });
+      if (res && res.ok) {
+        showToast(res.msg || 'NFC 状态已更新');
+        if (res.status) renderNfcStatus(res.status);
+        else loadNfcStatus(true);
+      } else {
+        showToast('切换失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    async function writeNfcTag(mode) {
+      if (mode === 'clear' && !confirm('确定清空 NFC 芯片内存储的数据吗？')) return;
+      showToast(mode === 'wifi' ? '正在将当前 Wi-Fi 写入 NFC 芯片...' : '正在清空 NFC 标签...');
+      const res = await apiCall('nfc.write', { mode });
+      if (res && res.ok) {
+        showToast(res.msg || 'NFC 写入成功');
+        if (res.status) renderNfcStatus(res.status);
+        else loadNfcStatus(true);
+      } else {
+        showToast('写入失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
+    function onNfcCustomModeChange() {
+      const mode = document.getElementById('nfc-custom-mode')?.value || 'url';
+      const inp = document.getElementById('nfc-custom-val');
+      if (inp) {
+        inp.placeholder = mode === 'url'
+          ? '如 http://192.168.78.1:8080/ 或 https://...'
+          : '输入手机一碰显示的备忘文本';
+      }
+    }
+
+    async function writeNfcCustom() {
+      const mode = document.getElementById('nfc-custom-mode').value;
+      const value = document.getElementById('nfc-custom-val').value.trim();
+      if (!value) return showToast('请先输入要写入 NFC 的内容', false);
+      showToast('正在写入自定义 NFC 内容...');
+      const res = await apiCall('nfc.write', { mode, value });
+      if (res && res.ok) {
+        showToast(res.msg || '写入成功');
+        if (res.status) renderNfcStatus(res.status);
+        else loadNfcStatus(true);
+      } else {
+        showToast('写入失败: ' + ((res && res.error) || ''), false);
+      }
+    }
+
     async function saveWifiConfig() {
       const ssid = document.getElementById('wifi-ssid').value.trim();
       const pass = document.getElementById('wifi-pass').value;
@@ -4886,8 +5043,9 @@
       if (pass) req.password = pass;
       const res = await apiCall('wifi.set', req);
       if (res && res.ok) {
-        showToast('Wi-Fi 配置已生效');
+        showToast('Wi-Fi 配置已生效，正在自动同步 NFC 标签...');
         document.getElementById('wifi-pass').value = '';
+        setTimeout(() => loadNfcStatus(true), 3500);
       } else {
         showToast('保存失败: ' + (res.error || ''), false);
       }

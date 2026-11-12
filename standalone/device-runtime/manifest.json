@@ -1955,8 +1955,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 13403,
-      "sha256": "7fa4ca7b058e1074e7b2dbad0df192fc5a74b0a6a11577f00f6c76ebe32d9ba8"
+      "size": 13523,
+      "sha256": "087ec181e218cb4d0f0816d5d356a8b37ac415c7a526d650d14a5d87fd088170"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-os",

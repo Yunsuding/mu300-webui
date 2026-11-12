@@ -36,6 +36,7 @@ i2ct() {  # i2ctransfer ARGS: i2c-tools when there, else busybox's
 # --- the enable line -------------------------------------------------------------------------------------------
 HOLD=
 enable() {
+    [ -n "$R" ] || [ -e "/dev/i2c-$BUS" ] || /sbin/modprobe i2c-dev 2>/dev/null || modprobe i2c-dev 2>/dev/null || true
     # 5.4: ZTE's fm11tag driver owns the line and offers it in /proc
     for f in "$R"/proc/ntag_gpios/*reset*; do
         [ -e "$f" ] && { echo 0 > "$f" && HOLD=proc:$f; trap disable EXIT INT TERM; nap 0.2; return; }
