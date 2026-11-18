@@ -1875,8 +1875,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 49151,
-      "sha256": "3ea8d521b8a49d35c3fb9b724e56f4c27d92df59b2d91349391526b58e6c5628"
+      "size": 49550,
+      "sha256": "c7a17c96d3abf7967db05672f940a556719845762fd90fed10cf20e659d55e4a"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-extra",

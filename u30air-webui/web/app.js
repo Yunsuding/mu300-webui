@@ -979,13 +979,13 @@ function renderNodesForCurrentGroup() {
       <tr class="${rowBg} hover:bg-slate-800/40 transition">
         <td class="py-3 pl-2 font-medium ${isSel ? 'text-cyan-300 font-bold' : 'text-white'}">
           ${isSel ? '<span class="inline-block w-2 h-2 rounded-full bg-cyan-400 mr-1.5 animate-pulse"></span>' : ''}
-          ${n.name}
+          ${escapeHtml(n.name)}
         </td>
-        <td class="py-3 text-slate-400">${n.type}</td>
+        <td class="py-3 text-slate-400">${escapeHtml(n.type)}</td>
         <td class="py-3 font-mono ${delayColor}" id="delay-${safeId(n.name)}">${delayTxt}</td>
         <td class="py-3 pr-2 text-right space-x-1.5 font-sans">
-          <button onclick="testSingleNodeDelay('${g.name}', '${escapeAttr(n.name)}')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs transition">测速</button>
-          <button onclick="selectVpnNode('${g.name}', '${escapeAttr(n.name)}')" class="px-2.5 py-1 ${isSel ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-cyan-600 hover:bg-cyan-500 text-black font-semibold'} rounded-lg text-xs transition" ${isSel ? 'disabled' : ''}>
+          <button onclick="testSingleNodeDelay('${escapeAttr(g.name)}', '${escapeAttr(n.name)}')" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-slate-300 hover:text-white rounded-lg text-xs transition">测速</button>
+          <button onclick="selectVpnNode('${escapeAttr(g.name)}', '${escapeAttr(n.name)}')" class="px-2.5 py-1 ${isSel ? 'bg-emerald-500/20 text-emerald-400 border border-emerald-500/30' : 'bg-cyan-600 hover:bg-cyan-500 text-black font-semibold'} rounded-lg text-xs transition" ${isSel ? 'disabled' : ''}>
             ${isSel ? '当前选中' : '选择'}
           </button>
         </td>
@@ -999,7 +999,15 @@ function safeId(str) {
 }
 
 function escapeAttr(str) {
-  return str.replace(/'/g, "\\'");
+  return String(str || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '')
+    .replace(/\n/g, '\\n')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 async function testSingleNodeDelay(groupName, nodeName) {
@@ -2870,7 +2878,15 @@ function escapeHtml(str) {
   return String(str || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
 }
 function escapeJs(str) {
-  return String(str || '').replace(/'/g, "\\'");
+  return String(str || '')
+    .replace(/\\/g, '\\\\')
+    .replace(/'/g, "\\'")
+    .replace(/\r/g, '')
+    .replace(/\n/g, '\\n')
+    .replace(/&/g, '&amp;')
+    .replace(/"/g, '&quot;')
+    .replace(/</g, '&lt;')
+    .replace(/>/g, '&gt;');
 }
 
 async function loadWifiTab() {

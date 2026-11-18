@@ -533,6 +533,15 @@ class Mu300PtyAtSession:
             self.__exit__(None, None, None)
             raise
 
+    @staticmethod
+    def _pty_write_all(fd, payload):
+        view = memoryview(payload)
+        while view:
+            written = os.write(fd, view)
+            if written <= 0:
+                break
+            view = view[written:]
+
     def _pty_loop(self):
         buf = b""
         opened_any = False
@@ -556,18 +565,18 @@ class Mu300PtyAtSession:
                         continue
                     u = line.upper()
                     if u in ("AT+CCHO=?", "AT+CCHC=?", "AT+CGLA=?"):
-                        os.write(self.master_fd, b"OK\r\n")
+                        self._pty_write_all(self.master_fd, b"OK\r\n")
                     elif u.startswith("AT+CCHC=") and not opened_any:
-                        os.write(self.master_fd, b"OK\r\n")
+                        self._pty_write_all(self.master_fd, b"OK\r\n")
                     elif u.startswith("AT+CCHO="):
                         aid = line.split("=", 1)[1].strip().strip('"')
                         ch = self.bridge.open_logic_channel(aid)
                         if ch > 0:
                             opened_any = True
-                            os.write(self.master_fd, f"+CCHO: {ch}\r\nOK\r\n".encode("ascii"))
+                            self._pty_write_all(self.master_fd, f"+CCHO: {ch}\r\nOK\r\n".encode("ascii"))
                         else:
                             self.last_apdu_error = f"无法打开 ISD-R 逻辑通道 (AID={aid[:16]}...)，该卡可能不是标准 eUICC 白卡"
-                            os.write(self.master_fd, b"ERROR\r\n")
+                            self._pty_write_all(self.master_fd, b"ERROR\r\n")
                     elif u.startswith("AT+CCHC="):
                         ch_s = line.split("=", 1)[1].strip()
                         try:
@@ -576,7 +585,7 @@ class Mu300PtyAtSession:
                             ch_i = 0
                         self.bridge.close_logic_channel(ch_i)
                         opened_any = bool(self.bridge.opened_channels)
-                        os.write(self.master_fd, b"OK\r\n")
+                        self._pty_write_all(self.master_fd, b"OK\r\n")
                     elif u.startswith("AT+CGLA="):
                         parts = line.split(",", 2)
                         if len(parts) == 3:
@@ -584,20 +593,20 @@ class Mu300PtyAtSession:
                             tx_hex = parts[2].strip().strip('"')
                             rx_hex = self.bridge.transmit_apdu(ch_i, tx_hex)
                             if rx_hex:
-                                os.write(self.master_fd, f'+CGLA: {len(rx_hex)},"{rx_hex}"\r\nOK\r\n'.encode("ascii"))
+                                self._pty_write_all(self.master_fd, f'+CGLA: {len(rx_hex)},"{rx_hex}"\r\nOK\r\n'.encode("ascii"))
                             else:
                                 self.last_apdu_error = "AT+CGLA 智能卡数据帧交换失败"
-                                os.write(self.master_fd, b"ERROR\r\n")
+                                self._pty_write_all(self.master_fd, b"ERROR\r\n")
                         else:
-                            os.write(self.master_fd, b"ERROR\r\n")
+                            self._pty_write_all(self.master_fd, b"ERROR\r\n")
                     else:
-                        os.write(self.master_fd, b"OK\r\n")
+                        self._pty_write_all(self.master_fd, b"OK\r\n")
             except OSError:
                 break
             except Exception as e:
                 self.last_apdu_error = str(e)
                 try:
-                    os.write(self.master_fd, b"ERROR\r\n")
+                    self._pty_write_all(self.master_fd, b"ERROR\r\n")
                 except OSError:
                     break
 
@@ -989,7 +998,8 @@ def set_profile_nickname(slot, iccid, nickname):
     atomic_write_json(SIM_CARDS_FILE, cards_db, mode=0o600)
 
     chip_nick = nick_str.encode("utf-8")[:60].decode("utf-8", errors="ignore")
-    chip_res = run_lpac_command(["profile", "nickname", clean_id, chip_nick], slot=slot, timeout_sec=25)
+    nick_args = ["profile", "nickname", clean_id] + ([chip_nick] if chip_nick else [])
+    chip_res = run_lpac_command(nick_args, slot=slot, timeout_sec=25)
     return {
         "ok": 1,
         "iccid": clean_id,

@@ -56,7 +56,7 @@ SESSIONS_FILE = os.path.join(BASE_DIR, ".sessions.json")
 # 会话存储 (Token -> {"user": user, "expire": timestamp})
 SESSIONS = {}
 STATE_LOCK = threading.RLock()
-AT_LOCK = threading.Lock()
+AT_LOCK = threading.RLock()
 STATIC_ASSET_CACHE = {}
 NET_PREV = {"time": time.time(), "rx": 0, "tx": 0, "rx_rate": 0, "tx_rate": 0, "iface": "sipa_eth0"}
 
@@ -2426,6 +2426,18 @@ def remove_vpn_subscription(req):
     build_merged_vpn_config(apply_live=True)
     return {"ok": 1, "id": sub_id}
 
+def _skip_dns_name(buf, pos):
+    """RFC 1035 DNS 域名跳过器：完整兼容纯标签、纯 0xC0 压缩指针及「字面量标签 + 0xC0 尾指针」混合编码"""
+    while pos < len(buf):
+        ln = buf[pos]
+        if ln == 0:
+            return pos + 1
+        if (ln & 0xC0) == 0xC0:
+            return pos + 2
+        pos += 1 + ln
+    return len(buf) + 1
+
+
 def _dns_query_a_marked(hostname, dns_ip="223.5.5.5", mark=0x2D0, timeout=3.5):
     """通过带 fwmark (0x2d0 绕过 VPN TUN/DNAT/断网保护) 的原始 UDP 套接字直连公共 DNS 解析 IPv4"""
     q_id = os.urandom(2)
@@ -2448,24 +2460,11 @@ def _dns_query_a_marked(hostname, dns_ip="223.5.5.5", mark=0x2D0, timeout=3.5):
         if ancount == 0:
             return ""
         # Skip header (12) + question section
-        idx = 12
-        while idx < len(resp) and resp[idx] != 0:
-            if (resp[idx] & 0xC0) == 0xC0:
-                idx += 2
-                break
-            idx += 1 + resp[idx]
-        else:
-            idx += 1
-        idx += 4  # QTYPE + QCLASS
+        idx = _skip_dns_name(resp, 12) + 4  # QTYPE + QCLASS
         for _ in range(ancount):
             if idx >= len(resp):
                 break
-            if (resp[idx] & 0xC0) == 0xC0:
-                idx += 2
-            else:
-                while idx < len(resp) and resp[idx] != 0:
-                    idx += 1 + resp[idx]
-                idx += 1
+            idx = _skip_dns_name(resp, idx)
             if idx + 10 > len(resp):
                 break
             rtype, rclass, _, rdlen = struct.unpack("!HHIH", resp[idx:idx + 10])
@@ -2480,8 +2479,10 @@ def _dns_query_a_marked(hostname, dns_ip="223.5.5.5", mark=0x2D0, timeout=3.5):
     return ""
 
 
-def _fetch_url_direct_uplink(url, user_agent="ClashMeta/1.18.0 (U30Air)", timeout=15):
+def _fetch_url_direct_uplink(url, user_agent="ClashMeta/1.18.0 (U30Air)", timeout=15, _redirects=0):
     """当代理节点因改 SNI 全部失效导致系统 DNS 1.1.1.1 超时时，强制打标 SO_MARK=0x2d0 走蜂窝物理网卡直连拉取订阅"""
+    if _redirects > 4:
+        raise RuntimeError("Too many redirects")
     parsed = urllib.parse.urlsplit(url)
     scheme = (parsed.scheme or "https").lower()
     host = parsed.hostname or ""
@@ -2499,83 +2500,81 @@ def _fetch_url_direct_uplink(url, user_agent="ClashMeta/1.18.0 (U30Air)", timeou
     if not target_ip:
         target_ip = socket.gethostbyname(host)
 
-    for _hop in range(4):
-        raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-        raw_sock.settimeout(timeout)
+    raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+    raw_sock.settimeout(timeout)
+    try:
         try:
-            try:
-                raw_sock.setsockopt(socket.SOL_SOCKET, 36, 0x2D0)
-            except OSError:
-                pass
-            raw_sock.connect((target_ip, port))
-            if scheme == "https":
-                ctx = ssl.create_default_context()
-                ctx.check_hostname = False
-                ctx.verify_mode = ssl.CERT_NONE
-                conn_sock = ctx.wrap_socket(raw_sock, server_hostname=host)
-            else:
-                conn_sock = raw_sock
+            raw_sock.setsockopt(socket.SOL_SOCKET, 36, 0x2D0)
+        except OSError:
+            pass
+        raw_sock.connect((target_ip, port))
+        if scheme == "https":
+            ctx = ssl.create_default_context()
+            ctx.check_hostname = False
+            ctx.verify_mode = ssl.CERT_NONE
+            conn_sock = ctx.wrap_socket(raw_sock, server_hostname=host)
+        else:
+            conn_sock = raw_sock
 
-            host_hdr = host if port in (80, 443) else f"{host}:{port}"
-            http_req = (
-                f"GET {req_path} HTTP/1.1\r\n"
-                f"Host: {host_hdr}\r\n"
-                f"User-Agent: {user_agent}\r\n"
-                f"Accept: */*\r\n"
-                f"Connection: close\r\n\r\n"
-            ).encode("utf-8")
-            conn_sock.sendall(http_req)
-            chunks = []
-            total = 0
-            while total < 1048576:
-                buf = conn_sock.recv(16384)
-                if not buf:
-                    break
-                chunks.append(buf)
-                total += len(buf)
-            conn_sock.close()
+        host_hdr = host if port in (80, 443) else f"{host}:{port}"
+        http_req = (
+            f"GET {req_path} HTTP/1.1\r\n"
+            f"Host: {host_hdr}\r\n"
+            f"User-Agent: {user_agent}\r\n"
+            f"Accept: */*\r\n"
+            f"Connection: close\r\n\r\n"
+        ).encode("utf-8")
+        conn_sock.sendall(http_req)
+        chunks = []
+        total = 0
+        while total < 1048576:
+            buf = conn_sock.recv(16384)
+            if not buf:
+                break
+            chunks.append(buf)
+            total += len(buf)
+        conn_sock.close()
+    except Exception:
+        try:
+            raw_sock.close()
         except Exception:
-            try:
-                raw_sock.close()
-            except Exception:
-                pass
-            raise
+            pass
+        raise
 
-        raw_resp = b"".join(chunks)
-        hdr_end = raw_resp.find(b"\r\n\r\n")
-        if hdr_end < 0:
-            raise RuntimeError("Invalid HTTP response from subscription server")
-        hdr_bytes, body_bytes = raw_resp[:hdr_end], raw_resp[hdr_end + 4:]
-        hdr_lines = hdr_bytes.decode("iso-8859-1", errors="ignore").splitlines()
-        status_code = int(hdr_lines[0].split()[1]) if (hdr_lines and len(hdr_lines[0].split()) >= 2) else 0
-        hdr_map = {}
-        for hl in hdr_lines[1:]:
-            if ":" in hl:
-                hk, hv = hl.split(":", 1)
-                hdr_map[hk.strip().lower()] = hv.strip()
+    raw_resp = b"".join(chunks)
+    hdr_end = raw_resp.find(b"\r\n\r\n")
+    if hdr_end < 0:
+        raise RuntimeError("Invalid HTTP response from subscription server")
+    hdr_bytes, body_bytes = raw_resp[:hdr_end], raw_resp[hdr_end + 4:]
+    hdr_lines = hdr_bytes.decode("iso-8859-1", errors="ignore").splitlines()
+    status_code = int(hdr_lines[0].split()[1]) if (hdr_lines and len(hdr_lines[0].split()) >= 2) else 0
+    hdr_map = {}
+    for hl in hdr_lines[1:]:
+        if ":" in hl:
+            hk, hv = hl.split(":", 1)
+            hdr_map[hk.strip().lower()] = hv.strip()
 
-        if status_code in (301, 302, 303, 307, 308) and hdr_map.get("location"):
-            next_url = urllib.parse.urljoin(f"{scheme}://{host}:{port}{req_path}", hdr_map["location"])
-            return _fetch_url_direct_uplink(next_url, user_agent=user_agent, timeout=timeout)
-        if status_code != 200:
-            raise RuntimeError(f"HTTP {status_code}")
+    if status_code in (301, 302, 303, 307, 308) and hdr_map.get("location"):
+        next_url = urllib.parse.urljoin(f"{scheme}://{host}:{port}{req_path}", hdr_map["location"])
+        return _fetch_url_direct_uplink(next_url, user_agent=user_agent, timeout=timeout, _redirects=_redirects + 1)
+    if status_code != 200:
+        raise RuntimeError(f"HTTP {status_code}")
 
-        if hdr_map.get("transfer-encoding", "").lower() == "chunked":
-            unchunked = bytearray()
-            pos = 0
-            while pos < len(body_bytes):
-                rn = body_bytes.find(b"\r\n", pos)
-                if rn < 0:
-                    break
-                csz = int(body_bytes[pos:rn].split(b";")[0].strip(), 16)
-                if csz == 0:
-                    break
-                unchunked.extend(body_bytes[rn + 2:rn + 2 + csz])
-                pos = rn + 2 + csz + 2
-            body_bytes = bytes(unchunked)
+    if hdr_map.get("transfer-encoding", "").lower() == "chunked":
+        unchunked = bytearray()
+        pos = 0
+        while pos < len(body_bytes):
+            rn = body_bytes.find(b"\r\n", pos)
+            if rn < 0:
+                break
+            csz = int(body_bytes[pos:rn].split(b";")[0].strip(), 16)
+            if csz == 0:
+                break
+            unchunked.extend(body_bytes[rn + 2:rn + 2 + csz])
+            pos = rn + 2 + csz + 2
+        body_bytes = bytes(unchunked)
 
-        return body_bytes.decode("utf-8", errors="ignore")
-    raise RuntimeError("Too many redirects")
+    return body_bytes.decode("utf-8", errors="ignore")
 
 
 def refresh_vpn_subscription(sub_id="all"):
@@ -3347,7 +3346,7 @@ COMM_PUSH_CONF_FILE = "/etc/mu300/webui-comm-push.json"
 COMM_PUSH_SEEN_FILE = "/etc/mu300/webui-comm-seen.json"
 COMM_EVENTS_FILE = "/run/mu300/webui-comm-events.json"
 
-AT_SLOT_LOCKS = [AT_LOCK, threading.Lock()]
+AT_SLOT_LOCKS = [AT_LOCK, threading.RLock()]
 SIM_SWITCH_LOCK = threading.Lock()
 FLASH_CANCEL_EVENT = threading.Event()
 TRAFFIC_SWAP_LOCK = threading.Lock()
@@ -3763,11 +3762,13 @@ def probe_sim_slot(slot_num, power_sim=False, check_euicc=True):
         })
 
     carrier = guess_carrier_from_ids(iccid, imsi)
-    if not carrier and is_euicc:
-        carrier = "eUICC 可编程白卡"
     cache_obj = load_sim_slot_cache()
     prev_slot_cache = cache_obj.get(str(idx), {}) if isinstance(cache_obj.get(str(idx)), dict) else {}
     same_card = bool(not iccid or iccid == prev_slot_cache.get("iccid", ""))
+    if not check_euicc and not is_euicc and same_card and prev_slot_cache.get("is_euicc"):
+        is_euicc = True
+    if not carrier and is_euicc:
+        carrier = "eUICC 可编程白卡"
     slot_record = {
         "cpin": cpin_state,
         "cfun": cfun_val,
@@ -5943,11 +5944,13 @@ def start_euicc_download_job(req_data):
         return parsed
 
     if attach_imei and not imei_str:
-        ok_imei, out_imei = _slot_at(s_num - 1, "AT+CGSN", timeout=4)
-        if ok_imei:
-            m_im = re.search(r"([0-9]{15})", out_imei)
-            if m_im:
-                imei_str = m_im.group(1)
+        for imei_slot in dict.fromkeys([s_num - 1, 0]):
+            ok_imei, out_imei = _slot_at(imei_slot, "AT+CGSN", timeout=4)
+            if ok_imei:
+                m_im = re.search(r"([0-9]{15})", out_imei)
+                if m_im:
+                    imei_str = m_im.group(1)
+                    break
 
     with EUICC_STATE_LOCK:
         if EUICC_DOWNLOAD_STATE["running"]:
@@ -6004,7 +6007,7 @@ def start_euicc_download_job(req_data):
 
             _invalidate_euicc_cache(s_num)
             if res.get("ok") and res.get("enabled"):
-                probe_sim_slot(s_num, power_sim=False, check_euicc=False)
+                probe_sim_slot(s_num, power_sim=True, check_euicc=True)
                 _invalidate_cellular_caches()
         except Exception as e:
             res = {"ok": 0, "error": str(e)}
@@ -6087,7 +6090,7 @@ def handle_euicc_api(method, req_data):
             )
             _invalidate_euicc_cache(s_num)
             if res.get("ok"):
-                probe_sim_slot(s_num, power_sim=False, check_euicc=False)
+                probe_sim_slot(s_num, power_sim=True, check_euicc=True)
                 _invalidate_cellular_caches()
                 res["overview"] = mod.get_full_euicc_overview(slot=s_num)
                 if res["overview"].get("ok"):
@@ -6103,7 +6106,7 @@ def handle_euicc_api(method, req_data):
             )
             _invalidate_euicc_cache(s_num)
             if res.get("ok"):
-                probe_sim_slot(s_num, power_sim=False, check_euicc=False)
+                probe_sim_slot(s_num, power_sim=True, check_euicc=True)
                 res["overview"] = mod.get_full_euicc_overview(slot=s_num)
                 if res["overview"].get("ok"):
                     EUICC_OVERVIEW_CACHE[s_num] = {"time": time.time(), "data": dict(res["overview"])}
