@@ -3,7 +3,7 @@
   "source_image_version": "v2026.10.27.2",
   "kernel": "5.4.254-gb50db5b6224c",
   "captured_at": "20261112-003720",
-  "entry_count": 288,
+  "entry_count": 290,
   "entries": [
     {
       "device_path": "/etc/mu300/bluetooth.conf.example",
@@ -1729,6 +1729,16 @@
       "sha256": "cf62d57455c7d6e2256e6ca313e53ae8bb0f91796262dc2bdec1c9202b7c83c4"
     },
     {
+      "device_path": "/opt/mu300/bin/lpac",
+      "repo_path": "opt-mu300/bin/lpac",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 227104,
+      "sha256": "8dea55c913f1482f03507ac33d125cc7df36154134e3a887eff9766bac879ac6"
+    },
+    {
       "device_path": "/opt/mu300/bin/mobile-data",
       "repo_path": "opt-mu300/bin/mobile-data",
       "mode": "0o755",
@@ -1857,6 +1867,16 @@
       "type": "file",
       "size": 3734,
       "sha256": "e79b8906e44dd75b37b91416cf55e8ffe3e63ad4e52404bf19cf25598a0f9427"
+    },
+    {
+      "device_path": "/opt/mu300/bin/mu300-euicc",
+      "repo_path": "opt-mu300/bin/mu300-euicc",
+      "mode": "0o755",
+      "uid": 0,
+      "gid": 0,
+      "type": "file",
+      "size": 49151,
+      "sha256": "3ea8d521b8a49d35c3fb9b724e56f4c27d92df59b2d91349391526b58e6c5628"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-extra",

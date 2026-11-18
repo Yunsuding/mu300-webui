@@ -1,0 +1,1190 @@
+#!/usr/bin/env python3
+# -*- coding: utf-8 -*-
+"""
+mu300-euicc: Lightweight GSMA SGP.22 eUICC (9eSIM / ESTK / 5ber / Infineon / ECP) manager
+for ZTE U30 Air (mu300) Ubuntu 24.04.
+
+Bridges `lpac v2.3+` (`LPAC_APDU=at` over an in-memory POSIX PTY + `LPAC_HTTP=curl`)
+directly to the Unisoc SIPC AT broker (`/run/mu300-at4` for SIM 2, `/run/mu300-at` for SIM 1)
+with zero serial contention, zero resident memory overhead, and automatic ECP/Infineon
+refreshFlag fallback.
+"""
+
+import argparse
+import json
+import os
+import re
+import subprocess
+import sys
+import threading
+import time
+
+try:
+    import fcntl
+except ImportError:
+    fcntl = None
+
+LPAC_BIN_CANDIDATES = (
+    os.environ.get("MU300_LPAC_BIN", ""),
+    "/opt/mu300/bin/lpac",
+    "/usr/local/bin/lpac",
+    "/usr/bin/lpac",
+)
+META_FILE = os.environ.get("MU300_EUICC_META", "/etc/mu300/euicc-meta.json")
+SIM_CARDS_FILE = os.environ.get("MU300_SIM_CARDS", "/etc/mu300/sim-cards.json")
+EUICC_LOCK_FILE = "/run/mu300/euicc.lock"
+
+STAGE_TRANSLATIONS = {
+    "es10x_init": "正在通过独立 AT 通道握手 eUICC 安全芯片...",
+    "es9p_initiate_authentication": "正在连接运营商 SM-DP+ 服务器发起双向鉴权...",
+    "es10b_authenticate_server": "芯片正在验证运营商服务器证书签名...",
+    "es9p_authenticate_client": "正在向运营商提交芯片 EID 与挑战应答...",
+    "es10b_prepare_download": "芯片正在准备安全下载通道...",
+    "es9p_get_bound_profile_package": "正在从海外运营商下载加密 eSIM 号码包...",
+    "es10b_load_bound_profile_package": "正在向白卡芯片分片写入 eSIM 配置...",
+    "es10b_get_euicc_challenge_and_info": "正在读取芯片安全挑战随机数与证书信息...",
+    "es10b_retrieve_notifications_list": "正在读取待上报运营商回执队列...",
+    "es9p_handle_notification": "正在向运营商服务器同步激活/删除回执...",
+}
+
+
+def find_lpac_bin():
+    for p in LPAC_BIN_CANDIDATES:
+        if p and os.path.isfile(p) and os.access(p, os.X_OK):
+            return p
+    return ""
+
+
+def atomic_write_json(path, obj, mode=0o600):
+    parent = os.path.dirname(path)
+    if parent:
+        os.makedirs(parent, exist_ok=True)
+    tmp = f"{path}.tmp.{os.getpid()}"
+    with open(tmp, "w", encoding="utf-8", newline="\n") as f:
+        json.dump(obj, f, ensure_ascii=False, indent=2)
+        f.write("\n")
+    try:
+        os.chmod(tmp, mode)
+    except OSError:
+        pass
+    os.replace(tmp, path)
+
+
+def load_json_dict(path, default=None):
+    if default is None:
+        default = {}
+    if os.path.exists(path):
+        try:
+            with open(path, "r", encoding="utf-8", errors="ignore") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                return data
+        except Exception:
+            pass
+    return dict(default)
+
+
+def mask_iccid(iccid):
+    s = re.sub(r"[^0-9A-Fa-f]", "", str(iccid or "")).upper()
+    if len(s) >= 12:
+        return f"{s[:6]}••••••{s[-4:]}"
+    return s
+
+
+def mask_eid(eid):
+    s = re.sub(r"[^0-9A-Fa-f]", "", str(eid or "")).upper()
+    if len(s) >= 16:
+        return f"{s[:8]}••••••{s[-6:]}"
+    return s
+
+
+def guess_country_region_from_iccid(iccid):
+    s = re.sub(r"[^0-9A-Fa-f]", "", str(iccid or "")).upper()
+    if not s.startswith("89"):
+        return {"code": "GLOBAL", "name": "全球漫游", "flag": "🌐"}
+    if s in ("89111111111111111111",) or (len(s) >= 16 and len(set(s[2:])) == 1):
+        return {"code": "SEED", "name": "空白种子占位", "flag": "💳"}
+    prefix_table = [
+        ("89852", "HK", "中国香港", "🇭🇰"),
+        ("89853", "MO", "中国澳门", "🇲🇴"),
+        ("89886", "TW", "中国台湾", "🇹🇼"),
+        ("8986", "CN", "中国大陆", "🇨🇳"),
+        ("8944", "GB", "英国", "🇬🇧"),
+        ("8901", "US", "美国", "🇺🇸"),
+        ("8981", "JP", "日本", "🇯🇵"),
+        ("8982", "KR", "韩国", "🇰🇷"),
+        ("8965", "SG", "新加坡", "🇸🇬"),
+        ("8966", "TH", "泰国", "🇹🇭"),
+        ("8960", "MY", "马来西亚", "🇲🇾"),
+        ("8962", "ID", "印度尼西亚", "🇮🇩"),
+        ("8963", "PH", "菲律宾", "🇵🇭"),
+        ("8984", "VN", "越南", "🇻🇳"),
+        ("8961", "AU", "澳大利亚", "🇦🇺"),
+        ("8964", "NZ", "新西兰", "🇳🇿"),
+        ("8949", "DE", "德国", "🇩🇪"),
+        ("8933", "FR", "法国", "🇫🇷"),
+        ("8931", "NL", "荷兰", "🇳🇱"),
+        ("8934", "ES", "西班牙", "🇪🇸"),
+        ("8939", "IT", "意大利", "🇮🇹"),
+        ("8941", "CH", "瑞士", "🇨🇭"),
+        ("8943", "AT", "奥地利", "🇦🇹"),
+        ("8948", "PL", "波兰", "🇵🇱"),
+        ("89353", "IE", "爱尔兰", "🇮🇪"),
+        ("89351", "PT", "葡萄牙", "🇵🇹"),
+        ("8946", "SE", "瑞典", "🇸🇪"),
+        ("89358", "FI", "芬兰", "🇫🇮"),
+        ("89372", "EE", "爱沙尼亚", "🇪🇪"),
+        ("89302", "CA", "加拿大", "🇨🇦"),
+        ("89971", "AE", "阿联酋", "🇦🇪"),
+        ("8990", "TR", "土耳其", "🇹🇷"),
+    ]
+    for pfx, code, name, flag in prefix_table:
+        if s.startswith(pfx):
+            return {"code": code, "name": name, "flag": flag}
+    return {"code": "INTL", "name": "海外漫游", "flag": "🌍"}
+
+
+def parse_lpa_activation_code(activation_code="", smdp="", matching_id="", confirmation_code=""):
+    """
+    解析二维码或手动输入的激活码：
+    支持:
+      1) LPA:1$<smdp>$<matching_id>[$<oid>][$<req_conf>]
+      2) 1$<smdp>$<matching_id>...
+      3) 独立传入 smdp + matching_id
+    """
+    ac = str(activation_code or "").strip()
+    smdp_out = str(smdp or "").strip()
+    mid_out = str(matching_id or "").strip()
+    cc_out = str(confirmation_code or "").strip()
+    oid_out = ""
+    cc_required = False
+
+    if ac:
+        ac_clean = ac.strip().strip("'\"")
+        body = ac_clean[4:] if ac_clean.upper().startswith("LPA:") else ac_clean
+        if body.startswith("1$"):
+            parts = body.split("$")
+            if len(parts) >= 2 and parts[1].strip():
+                smdp_out = parts[1].strip()
+            if len(parts) >= 3:
+                mid_out = parts[2].strip()
+            if len(parts) >= 4:
+                oid_out = parts[3].strip()
+            if len(parts) >= 5 and parts[4].strip() == "1":
+                cc_required = True
+        elif not smdp_out and "." in ac_clean and "$" not in ac_clean and " " not in ac_clean:
+            smdp_out = re.sub(r"^https?://", "", ac_clean, flags=re.I).rstrip("/")
+        elif smdp_out and not mid_out:
+            mid_out = ac_clean
+
+    smdp_out = re.sub(r"^https?://", "", smdp_out, flags=re.I).strip().strip("/")
+    if not smdp_out or not re.fullmatch(r"[A-Za-z0-9._-]+(?::[0-9]{1,5})?", smdp_out):
+        return {"ok": 0, "error": "无效的 SM-DP+ 服务器域名，请检查二维码或激活码格式（如 LPA:1$smdp.example.com$MATCHING_ID）"}
+    if any(c in mid_out for c in ("\r", "\n", "\x00")):
+        return {"ok": 0, "error": "Matching ID 激活码包含非法字符"}
+    if cc_required and not cc_out:
+        return {"ok": 0, "error": "该 eSIM 二维码要求填写确认码 (Confirmation Code)，请在确认码输入框中补充", "confirmation_required": True}
+
+    canonical_lpa = f"LPA:1${smdp_out}${mid_out}"
+    if oid_out or cc_required:
+        canonical_lpa = f"LPA:1${smdp_out}${mid_out}${oid_out}${'1' if cc_required else ''}".rstrip("$")
+
+    return {
+        "ok": 1,
+        "smdp": smdp_out,
+        "matching_id": mid_out,
+        "oid": oid_out,
+        "confirmation_code": cc_out,
+        "confirmation_required": cc_required,
+        "lpa_str": canonical_lpa,
+    }
+
+
+def estimate_chip_capacity(free_bytes, installed_count, max_seen_bytes=0):
+    fb = max(0, int(free_bytes or 0))
+    ms = max(fb, int(max_seen_bytes or 0))
+    if ms >= 900 * 1024:
+        tier_kb = max(1220.0, round(ms / 1024.0, 1))
+        tier_label = "1.2MB 大容量芯片 (U6 级)"
+    elif ms >= 430 * 1024:
+        tier_kb = max(480.0, round(ms / 1024.0, 1))
+        tier_label = "512KB 中大容量芯片 (U3 级)"
+    elif ms >= 340 * 1024:
+        tier_kb = max(420.0, round(ms / 1024.0, 1))
+        tier_label = "420KB 标准容量芯片"
+    elif ms >= 180 * 1024:
+        tier_kb = max(220.0, round(ms / 1024.0, 1))
+        tier_label = "210KB 标准芯片 (U1 级)"
+    elif ms > 0:
+        est_b = ms + int(installed_count or 0) * 35840
+        tier_kb = round(max(128.0, est_b / 1024.0), 1)
+        tier_label = "标准 eUICC 芯片"
+    else:
+        tier_kb = 0.0
+        tier_label = "未知容量"
+
+    free_kb = round(fb / 1024.0, 1)
+    used_kb = round(max(0.0, tier_kb - free_kb), 1) if tier_kb > 0 else 0.0
+    used_pct = round(min(100.0, (used_kb / tier_kb) * 100.0), 1) if tier_kb > 0 else 0.0
+    est_slots_left = int(fb // (35 * 1024)) if fb > 0 else 0
+    return {
+        "free_bytes": fb,
+        "free_kb": free_kb,
+        "total_kb_est": tier_kb,
+        "used_kb_est": used_kb,
+        "used_pct_est": used_pct,
+        "tier_label": tier_label,
+        "est_profiles_remaining": est_slots_left,
+    }
+
+
+def _pid_alive_with_token(pid_str, token):
+    try:
+        pid = int(str(pid_str).strip())
+        if pid <= 0 or not os.path.isdir(f"/proc/{pid}"):
+            return False
+        with open(f"/proc/{pid}/cmdline", "rb") as f:
+            cmd = f.read().replace(b"\x00", b" ").decode("utf-8", errors="ignore")
+        return token in cmd
+    except Exception:
+        return False
+
+
+def get_active_sim_slot_num():
+    try:
+        proc = subprocess.run(["/opt/mu300/bin/mu300-sim", "active"], capture_output=True, text=True, timeout=3)
+        if proc.returncode == 0 and proc.stdout.strip() in ("0", "1"):
+            return int(proc.stdout.strip()) + 1
+    except Exception:
+        pass
+    return 1
+
+
+class Mu300AtFifoBridge:
+    """
+    Holds the mu300-atd per-channel mutex (`$DIR/lock`) across an lpac session
+    and speaks the `$DIR/cmd` FIFO protocol (`<T> <$DIR/answer.<pid>> <AT_CMD>\\n`) directly
+    with zero shell forks per APDU.
+    """
+
+    def __init__(self, slot=2, progress_cb=None):
+        self.slot = 2 if int(slot) == 2 else 1
+        self.at_dir = "/run/mu300-at4" if self.slot == 2 else "/run/mu300-at"
+        self.cmd_fifo = os.path.join(self.at_dir, "cmd")
+        self.lock_dir = os.path.join(self.at_dir, "lock")
+        self.answer_path = os.path.join(self.at_dir, f"answer.{os.getpid()}")
+        self.lock_acquired = False
+        self.opened_channels = set()
+        self.last_channel = 0
+        self.apdu_count = 0
+        self.progress_cb = progress_cb
+
+    def _ensure_broker_ready(self):
+        if os.path.exists("/run/mu300/sim-switching"):
+            raise RuntimeError("当前正在执行双卡网络切换，请等待切卡完成后再操作 eSIM")
+        if not os.path.exists(self.cmd_fifo) and self.slot == 2:
+            prep = "/opt/mu300/bin/mu300-sim-boot-prep"
+            if os.path.exists(prep):
+                subprocess.run([prep, "enable-live"], capture_output=True, text=True, timeout=25)
+        if not os.path.exists(self.cmd_fifo):
+            raise RuntimeError(f"SIM {self.slot} 独立 AT 守护通道 ({self.cmd_fifo}) 未就绪")
+
+    def acquire_at_lock(self, wait_sec=35):
+        if self.lock_acquired:
+            self._refresh_lock_lease(120)
+            return
+        self._ensure_broker_ready()
+        deadline = time.time() + wait_sec
+        while True:
+            try:
+                os.mkdir(self.lock_dir, 0o700)
+                self.lock_acquired = True
+                break
+            except FileExistsError:
+                pid_file = os.path.join(self.lock_dir, "pid")
+                until_file = os.path.join(self.lock_dir, "until")
+                owner_pid = ""
+                try:
+                    with open(pid_file, "r", encoding="utf-8") as f:
+                        owner_pid = f.read().strip()
+                except OSError:
+                    pass
+                if owner_pid:
+                    try:
+                        os.kill(int(owner_pid), 0)
+                        alive = True
+                    except Exception:
+                        alive = False
+                    if not alive or _pid_alive_with_token(owner_pid, "mu300-atd"):
+                        self._force_remove_lock_dir()
+                        continue
+                    try:
+                        with open(until_file, "r", encoding="utf-8") as f:
+                            due = int(f.read().strip())
+                        if time.time() > due and _pid_alive_with_token(owner_pid, "mu300-at"):
+                            os.kill(int(owner_pid), 9)
+                            self._force_remove_lock_dir()
+                            continue
+                    except Exception:
+                        pass
+                if time.time() >= deadline:
+                    raise RuntimeError(f"SIM {self.slot} AT 串口通道正忙，请稍后重试")
+                time.sleep(0.08)
+
+        self._refresh_lock_lease(120)
+
+    def _refresh_lock_lease(self, lease_sec=120):
+        if not self.lock_acquired:
+            return
+        try:
+            with open(os.path.join(self.lock_dir, "pid"), "w", encoding="utf-8") as f:
+                f.write(f"{os.getpid()}\n")
+            with open(os.path.join(self.lock_dir, "until"), "w", encoding="utf-8") as f:
+                f.write(f"{int(time.time()) + int(lease_sec)}\n")
+        except OSError:
+            pass
+
+    def _force_remove_lock_dir(self):
+        for fn in ("pid", "until"):
+            try:
+                os.remove(os.path.join(self.lock_dir, fn))
+            except OSError:
+                pass
+        try:
+            os.rmdir(self.lock_dir)
+        except OSError:
+            pass
+
+    def release_at_lock(self):
+        for p in (self.answer_path, self.answer_path + ".part"):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+        if self.lock_acquired:
+            self.lock_acquired = False
+            self._force_remove_lock_dir()
+
+    def send_at(self, cmd, timeout_sec=10):
+        if any(c in cmd for c in ("\r", "\n", "\x00")):
+            raise ValueError("Invalid control char in AT command")
+        t_int = max(1, min(90, int(timeout_sec)))
+        self._refresh_lock_lease(t_int + 60)
+        for p in (self.answer_path, self.answer_path + ".part"):
+            try:
+                os.remove(p)
+            except OSError:
+                pass
+
+        fifo_fd = os.open(self.cmd_fifo, os.O_RDWR)
+        try:
+            req_line = f"{t_int} {self.answer_path} {cmd}\n".encode("ascii")
+            os.write(fifo_fd, req_line)
+            deadline = time.time() + t_int + 12
+            while not os.path.exists(self.answer_path):
+                if time.time() >= deadline:
+                    raise TimeoutError(f"AT 命令响应超时: {cmd[:32]}")
+                time.sleep(0.008)
+            with open(self.answer_path, "r", encoding="utf-8", errors="replace") as af:
+                reply = af.read()
+        finally:
+            try:
+                os.close(fifo_fd)
+            except OSError:
+                pass
+            for p in (self.answer_path, self.answer_path + ".part"):
+                try:
+                    os.remove(p)
+                except OSError:
+                    pass
+        return reply.replace("\r", "").strip()
+
+    def ensure_sim_powered(self):
+        out = self.send_at("AT+CPIN?", timeout_sec=4)
+        if "+CPIN: READY" in out:
+            return
+        if self.slot != get_active_sim_slot_num():
+            self.send_at("AT+SFUN=2", timeout_sec=10)
+            time.sleep(1.2)
+            out = self.send_at("AT+CPIN?", timeout_sec=4)
+        if "+CPIN: READY" not in out:
+            raise RuntimeError(f"SIM {self.slot} 未检测到就绪卡片 ({out.splitlines()[-1] if out else 'NO_SIM'})")
+
+    def open_logic_channel(self, aid):
+        aid_clean = re.sub(r"[^0-9A-Fa-f]", "", str(aid or "")).upper()
+        if not aid_clean:
+            return -1
+        out = self.send_at(f'AT+CCHO="{aid_clean}"', timeout_sec=6)
+        ch = self._parse_ccho(out)
+        if ch <= 0:
+            for stale_ch in (1, 2, 3, 4):
+                try:
+                    self.send_at(f"AT+CCHC={stale_ch}", timeout_sec=3)
+                except Exception:
+                    pass
+            out = self.send_at(f'AT+CCHO="{aid_clean}"', timeout_sec=6)
+            ch = self._parse_ccho(out)
+        if ch > 0:
+            self.opened_channels.add(ch)
+            self.last_channel = ch
+        return ch
+
+    def close_logic_channel(self, ch):
+        ch_int = int(ch or self.last_channel or 0)
+        if ch_int > 0:
+            try:
+                self.send_at(f"AT+CCHC={ch_int}", timeout_sec=4)
+            except Exception:
+                pass
+            self.opened_channels.discard(ch_int)
+            if self.last_channel == ch_int:
+                self.last_channel = max(self.opened_channels) if self.opened_channels else 0
+
+    def transmit_apdu(self, ch, tx_hex):
+        tx_clean = re.sub(r"[^0-9A-Fa-f]", "", str(tx_hex or "")).upper()
+        ch_int = int(ch or self.last_channel or 0)
+        if ch_int <= 0 or not tx_clean:
+            return ""
+        self.apdu_count += 1
+        if self.progress_cb and (self.apdu_count == 1 or self.apdu_count % 5 == 0):
+            self.progress_cb("apdu", f"正在与白卡安全芯片交互 (第 {self.apdu_count} 帧 APDU)...", self.apdu_count)
+        out = self.send_at(f'AT+CGLA={ch_int},{len(tx_clean)},"{tx_clean}"', timeout_sec=25)
+        return self._parse_cgla(out)
+
+    @staticmethod
+    def _parse_ccho(out):
+        m = re.search(r"\+CCHO:\s*(\d+)", out or "")
+        if not m:
+            m = re.search(r"(?m)^([1-9]\d*)\s*$", out or "")
+        return int(m.group(1)) if m else -1
+
+    @staticmethod
+    def _parse_cgla(out):
+        if not out or ("ERROR" in out and "+CGLA:" not in out):
+            return ""
+        m = re.search(r'\+CGLA:\s*\d+\s*,\s*"?([0-9A-Fa-f]+)"?', out)
+        return m.group(1).upper() if m else ""
+
+    def close_all(self):
+        for ch in list(self.opened_channels):
+            try:
+                self.send_at(f"AT+CCHC={ch}", timeout_sec=3)
+            except Exception:
+                pass
+        self.opened_channels.clear()
+        self.last_channel = 0
+        self.release_at_lock()
+
+
+class Mu300PtyAtSession:
+    """
+    Reusable context manager that acquires `/run/mu300/euicc.lock` + `$AT_DIR/lock`,
+    powers SIM contacts if needed, and exposes a virtual non-echoing POSIX PTY
+    for `lpac` (`LPAC_APDU=at`, `LPAC_APDU_AT_DEVICE=<pty_slave>`).
+    """
+
+    def __init__(self, slot=2, progress_cb=None):
+        self.slot = 2 if int(slot) == 2 else 1
+        self.progress_cb = progress_cb
+        self.bridge = Mu300AtFifoBridge(slot=self.slot, progress_cb=progress_cb)
+        self.lock_fp = None
+        self.master_fd = None
+        self.slave_fd = None
+        self.slave_name = ""
+        self.stop_evt = threading.Event()
+        self.worker_thread = None
+        self.last_apdu_error = ""
+
+    def __enter__(self):
+        import pty
+        import termios
+
+        os.makedirs("/run/mu300", exist_ok=True)
+        self.lock_fp = open(EUICC_LOCK_FILE, "w", encoding="utf-8")
+        deadline = time.time() + 45
+        locked = False
+        while time.time() < deadline:
+            try:
+                if fcntl:
+                    fcntl.flock(self.lock_fp.fileno(), fcntl.LOCK_EX | fcntl.LOCK_NB)
+                locked = True
+                break
+            except BlockingIOError:
+                time.sleep(0.15)
+        if not locked:
+            self.lock_fp.close()
+            self.lock_fp = None
+            raise RuntimeError("已有另一项 eSIM 写卡或切卡操作正在执行，请稍候")
+
+        try:
+            self.bridge.acquire_at_lock(wait_sec=35)
+            self.bridge.ensure_sim_powered()
+            self.master_fd, self.slave_fd = pty.openpty()
+            attrs = termios.tcgetattr(self.slave_fd)
+            attrs[3] = attrs[3] & ~termios.ECHO & ~termios.ICANON
+            attrs[1] = attrs[1] & ~termios.OPOST
+            termios.tcsetattr(self.slave_fd, termios.TCSANOW, attrs)
+            self.slave_name = os.ttyname(self.slave_fd)
+            self.stop_evt.clear()
+            self.worker_thread = threading.Thread(target=self._pty_loop, daemon=True)
+            self.worker_thread.start()
+            return self
+        except Exception:
+            self.__exit__(None, None, None)
+            raise
+
+    def _pty_loop(self):
+        buf = b""
+        opened_any = False
+        while not self.stop_evt.is_set():
+            try:
+                chunk = os.read(self.master_fd, 4096)
+                if not chunk:
+                    break
+                buf += chunk
+                while b"\n" in buf or b"\r" in buf:
+                    idx_r = buf.find(b"\r")
+                    idx_n = buf.find(b"\n")
+                    candidates = [x for x in (idx_r, idx_n) if x >= 0]
+                    cut = min(candidates)
+                    raw_line = buf[:cut]
+                    buf = buf[cut + 1:]
+                    if buf.startswith(b"\n") and cut == idx_r:
+                        buf = buf[1:]
+                    line = raw_line.decode("ascii", errors="ignore").strip()
+                    if not line:
+                        continue
+                    u = line.upper()
+                    if u in ("AT+CCHO=?", "AT+CCHC=?", "AT+CGLA=?"):
+                        os.write(self.master_fd, b"OK\r\n")
+                    elif u.startswith("AT+CCHC=") and not opened_any:
+                        os.write(self.master_fd, b"OK\r\n")
+                    elif u.startswith("AT+CCHO="):
+                        aid = line.split("=", 1)[1].strip().strip('"')
+                        ch = self.bridge.open_logic_channel(aid)
+                        if ch > 0:
+                            opened_any = True
+                            os.write(self.master_fd, f"+CCHO: {ch}\r\nOK\r\n".encode("ascii"))
+                        else:
+                            self.last_apdu_error = f"无法打开 ISD-R 逻辑通道 (AID={aid[:16]}...)，该卡可能不是标准 eUICC 白卡"
+                            os.write(self.master_fd, b"ERROR\r\n")
+                    elif u.startswith("AT+CCHC="):
+                        ch_s = line.split("=", 1)[1].strip()
+                        try:
+                            ch_i = int(ch_s)
+                        except ValueError:
+                            ch_i = 0
+                        self.bridge.close_logic_channel(ch_i)
+                        opened_any = bool(self.bridge.opened_channels)
+                        os.write(self.master_fd, b"OK\r\n")
+                    elif u.startswith("AT+CGLA="):
+                        parts = line.split(",", 2)
+                        if len(parts) == 3:
+                            ch_i = int(parts[0].split("=", 1)[1].strip() or "1")
+                            tx_hex = parts[2].strip().strip('"')
+                            rx_hex = self.bridge.transmit_apdu(ch_i, tx_hex)
+                            if rx_hex:
+                                os.write(self.master_fd, f'+CGLA: {len(rx_hex)},"{rx_hex}"\r\nOK\r\n'.encode("ascii"))
+                            else:
+                                self.last_apdu_error = "AT+CGLA 智能卡数据帧交换失败"
+                                os.write(self.master_fd, b"ERROR\r\n")
+                        else:
+                            os.write(self.master_fd, b"ERROR\r\n")
+                    else:
+                        os.write(self.master_fd, b"OK\r\n")
+            except OSError:
+                break
+            except Exception as e:
+                self.last_apdu_error = str(e)
+                try:
+                    os.write(self.master_fd, b"ERROR\r\n")
+                except OSError:
+                    break
+
+    def run_cmd(self, args, timeout_sec=180, mss=120):
+        lpac_bin = find_lpac_bin()
+        if not lpac_bin:
+            return {"ok": 0, "error": "未找到 lpac 核心组件 (/opt/mu300/bin/lpac)"}
+        self.last_apdu_error = ""
+        before_apdu = self.bridge.apdu_count
+        env = dict(os.environ)
+        env["LPAC_APDU"] = "at"
+        env["LPAC_APDU_AT_DEVICE"] = self.slave_name
+        env["LPAC_HTTP"] = "curl"
+        env["LPAC_CUSTOM_ES10X_MSS"] = str(max(60, min(240, int(mss or 120))))
+
+        lpa_result = None
+        proc = subprocess.Popen(
+            [lpac_bin] + list(args),
+            stdin=subprocess.DEVNULL,
+            stdout=subprocess.PIPE,
+            stderr=subprocess.PIPE,
+            text=True,
+            bufsize=1,
+            env=env,
+        )
+        try:
+            start_ts = time.time()
+            while True:
+                if time.time() - start_ts > timeout_sec:
+                    proc.kill()
+                    return {"ok": 0, "error": f"eSIM 操作超时 ({timeout_sec}s)"}
+                line = proc.stdout.readline()
+                if not line:
+                    break
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    msg = json.loads(line)
+                except Exception:
+                    continue
+                mtype = msg.get("type")
+                payload = msg.get("payload") if isinstance(msg.get("payload"), dict) else {}
+                if mtype == "progress":
+                    step_key = str(payload.get("message") or "")
+                    human = STAGE_TRANSLATIONS.get(step_key, step_key or "正在处理...")
+                    if self.progress_cb:
+                        self.progress_cb(step_key, human, self.bridge.apdu_count)
+                elif mtype == "lpa":
+                    lpa_result = payload
+
+            stderr_txt = ""
+            if proc.stderr:
+                try:
+                    stderr_txt = proc.stderr.read().strip()
+                except Exception:
+                    pass
+            proc.wait(timeout=5)
+            delta_apdu = self.bridge.apdu_count - before_apdu
+
+            if isinstance(lpa_result, dict):
+                code = int(lpa_result.get("code", -1))
+                if code == 0:
+                    return {
+                        "ok": 1,
+                        "code": 0,
+                        "data": lpa_result.get("data"),
+                        "apdu_count": delta_apdu,
+                    }
+                err_msg = str(lpa_result.get("message") or "lpac_error")
+                err_data = lpa_result.get("data")
+                detail = f"{err_msg}" + (f": {err_data}" if err_data else "")
+                if self.last_apdu_error:
+                    detail = f"{self.last_apdu_error} ({detail})"
+                return {"ok": 0, "code": code, "error": detail, "stderr": stderr_txt[:200]}
+
+            return {
+                "ok": 0,
+                "error": self.last_apdu_error or stderr_txt[:200] or f"lpac 异常退出 (rc={proc.returncode})",
+            }
+        finally:
+            if proc.poll() is None:
+                try:
+                    proc.kill()
+                except Exception:
+                    pass
+
+    def __exit__(self, exc_type, exc_val, exc_tb):
+        self.stop_evt.set()
+        for fd in (self.slave_fd, self.master_fd):
+            if fd is not None:
+                try:
+                    os.close(fd)
+                except OSError:
+                    pass
+        self.slave_fd = None
+        self.master_fd = None
+        self.bridge.close_all()
+        if self.lock_fp is not None:
+            try:
+                if fcntl:
+                    fcntl.flock(self.lock_fp.fileno(), fcntl.LOCK_UN)
+            except Exception:
+                pass
+            try:
+                self.lock_fp.close()
+            except Exception:
+                pass
+            self.lock_fp = None
+
+
+def run_lpac_command(args, slot=2, progress_cb=None, timeout_sec=180, mss=120, session=None):
+    if session is not None:
+        return session.run_cmd(args, timeout_sec=timeout_sec, mss=mss)
+    try:
+        with Mu300PtyAtSession(slot=slot, progress_cb=progress_cb) as sess:
+            return sess.run_cmd(args, timeout_sec=timeout_sec, mss=mss)
+    except Exception as e:
+        return {"ok": 0, "error": str(e)}
+
+
+def refresh_slot_usim_after_switch(slot=2):
+    """切卡启用/禁用新 eSIM Profile 后，无损刷新该卡槽 USIM 视图，使新 ICCID 立即生效而不中断主卡流量"""
+    s_num = 2 if int(slot) == 2 else 1
+    active_num = get_active_sim_slot_num()
+    if s_num == active_num:
+        subprocess.run(["systemctl", "restart", "mu300-mobile-data.service"], capture_output=True, timeout=35)
+        return
+    at_dir = "/run/mu300-at4" if s_num == 2 else "/run/mu300-at"
+    at_bin = "/opt/mu300/bin/mu300-at"
+    if os.path.exists(at_bin) and os.path.exists(os.path.join(at_dir, "cmd")):
+        env = dict(os.environ, MU300_AT_DIR=at_dir, MU300_SIM_SLOT=str(s_num - 1))
+        subprocess.run([at_bin, "-t", "6", "AT+CFUN=0"], capture_output=True, timeout=10, env=env)
+        time.sleep(0.5)
+        subprocess.run([at_bin, "-t", "8", "AT+SFUN=2"], capture_output=True, timeout=12, env=env)
+        time.sleep(0.8)
+
+
+def get_full_euicc_overview(slot=2):
+    meta = load_json_dict(META_FILE, {"chips": {}, "nicknames": {}})
+    cards_db = load_json_dict(SIM_CARDS_FILE, {"cards": {}}).get("cards", {})
+
+    try:
+        with Mu300PtyAtSession(slot=slot) as sess:
+            chip_res = run_lpac_command(["chip", "info"], slot=slot, timeout_sec=35, session=sess)
+            if not chip_res.get("ok"):
+                return {
+                    "ok": 0,
+                    "slot": int(slot),
+                    "is_euicc": False,
+                    "error": chip_res.get("error") or "当前卡槽未检测到可用 eUICC 白卡芯片",
+                }
+            prof_res = run_lpac_command(["profile", "list"], slot=slot, timeout_sec=35, session=sess)
+            notif_res = run_lpac_command(["notification", "list"], slot=slot, timeout_sec=30, session=sess)
+    except Exception as e:
+        return {
+            "ok": 0,
+            "slot": int(slot),
+            "is_euicc": False,
+            "error": str(e),
+        }
+
+    cdata = chip_res.get("data") if isinstance(chip_res.get("data"), dict) else {}
+    eid = str(cdata.get("eidValue") or "").strip().upper()
+    addrs = cdata.get("EuiccConfiguredAddresses") if isinstance(cdata.get("EuiccConfiguredAddresses"), dict) else {}
+    info2 = cdata.get("EUICCInfo2") if isinstance(cdata.get("EUICCInfo2"), dict) else {}
+    ext_res = info2.get("extCardResource") if isinstance(info2.get("extCardResource"), dict) else {}
+
+    free_nv = int(ext_res.get("freeNonVolatileMemory", 0) or 0)
+    free_ram = int(ext_res.get("freeVolatileMemory", 0) or 0)
+    installed_apps = int(ext_res.get("installedApplication", 0) or 0)
+
+    chips_meta = meta.setdefault("chips", {})
+    chip_rec = dict(chips_meta.get(eid) or {}) if eid else {}
+    prev_max = int(chip_rec.get("max_free_bytes", 0) or 0)
+    if eid and free_nv > prev_max:
+        chip_rec["max_free_bytes"] = free_nv
+        chip_rec["updated_at"] = int(time.time())
+        chips_meta[eid] = chip_rec
+        atomic_write_json(META_FILE, meta, mode=0o600)
+
+    raw_profiles = prof_res.get("data") if (prof_res.get("ok") and isinstance(prof_res.get("data"), list)) else []
+    nick_map = meta.get("nicknames") if isinstance(meta.get("nicknames"), dict) else {}
+    profiles = []
+    enabled_iccid = ""
+    for p in raw_profiles:
+        if not isinstance(p, dict):
+            continue
+        iccid = re.sub(r"[^0-9A-Fa-f]", "", str(p.get("iccid") or "")).upper()
+        state = str(p.get("profileState") or "disabled").lower()
+        is_enabled = (state == "enabled")
+        if is_enabled and iccid:
+            enabled_iccid = iccid
+        chip_nick = str(p.get("profileNickname") or "").strip()
+        local_nick = str(nick_map.get(iccid) or (cards_db.get(iccid) or {}).get("nickname") or "").strip()
+        nickname = local_nick or chip_nick
+        provider = str(p.get("serviceProviderName") or "").strip()
+        pname = str(p.get("profileName") or "").strip()
+        region = guess_country_region_from_iccid(iccid)
+        profiles.append({
+            "iccid": iccid,
+            "iccid_masked": mask_iccid(iccid),
+            "isdp_aid": str(p.get("isdpAid") or "").upper(),
+            "state": "enabled" if is_enabled else "disabled",
+            "enabled": is_enabled,
+            "nickname": nickname,
+            "chip_nickname": chip_nick,
+            "provider": provider or region["name"],
+            "profile_name": pname or provider or "eSIM Profile",
+            "profile_class": str(p.get("profileClass") or "operational"),
+            "region": region,
+        })
+
+    profiles.sort(key=lambda x: (0 if x["enabled"] else 1, x["iccid"]))
+
+    cap_info = estimate_chip_capacity(
+        free_nv,
+        max(installed_apps, len(profiles)),
+        max_seen_bytes=max(prev_max, free_nv),
+    )
+
+    raw_notifs = notif_res.get("data") if (notif_res.get("ok") and isinstance(notif_res.get("data"), list)) else []
+    notifications = []
+    for n in raw_notifs:
+        if not isinstance(n, dict):
+            continue
+        iccid_n = re.sub(r"[^0-9A-Fa-f]", "", str(n.get("iccid") or "")).upper()
+        notifications.append({
+            "seq": int(n.get("seqNumber", 0) or 0),
+            "operation": str(n.get("profileManagementOperation") or ""),
+            "address": str(n.get("notificationAddress") or ""),
+            "iccid": iccid_n,
+            "iccid_masked": mask_iccid(iccid_n),
+        })
+    notifications.sort(key=lambda x: x["seq"], reverse=True)
+
+    sas_num = str(info2.get("sasAcreditationNumber") or info2.get("sasAccreditationNumber") or "").strip()
+    ci_list = info2.get("euiccCiPKIdListForVerification") if isinstance(info2.get("euiccCiPKIdListForVerification"), list) else []
+
+    return {
+        "ok": 1,
+        "slot": int(slot),
+        "active_data_slot": get_active_sim_slot_num(),
+        "is_euicc": True,
+        "chip": {
+            "eid": eid,
+            "eid_masked": mask_eid(eid),
+            "default_smdp": str(addrs.get("defaultDpAddress") or ""),
+            "root_smds": str(addrs.get("rootDsAddress") or ""),
+            "svn": str(info2.get("svn") or ""),
+            "firmware_ver": str(info2.get("euiccFirmwareVer") or ""),
+            "sas_accreditation": sas_num,
+            "free_ram_bytes": free_ram,
+            "installed_count": len(profiles),
+            "ci_count": len(ci_list),
+            "capacity": cap_info,
+        },
+        "enabled_iccid": enabled_iccid,
+        "profiles": profiles,
+        "notifications": notifications,
+    }
+
+
+def switch_profile_state(slot, iccid, action="enable", isdp_aid="", auto_notify=True):
+    clean_id = re.sub(r"[^0-9A-Fa-f]", "", str(iccid or "")).upper()
+    aid_clean = re.sub(r"[^0-9A-Fa-f]", "", str(isdp_aid or "")).upper()
+    if len(clean_id) < 15 and not aid_clean:
+        return {"ok": 0, "error": "缺少有效的目标 Profile ICCID"}
+    verb = "enable" if action == "enable" else "disable"
+
+    attempts = []
+    if clean_id:
+        attempts.append(["profile", verb, clean_id, "1"])
+        attempts.append(["profile", verb, clean_id, "0"])
+    if aid_clean:
+        attempts.append(["profile", verb, aid_clean, "0"])
+        attempts.append(["profile", verb, aid_clean, "1"])
+
+    last_res = None
+    succeeded = False
+    notif_status = None
+
+    try:
+        with Mu300PtyAtSession(slot=slot) as sess:
+            for cmd_args in attempts:
+                res = run_lpac_command(cmd_args, slot=slot, timeout_sec=45, session=sess)
+                last_res = res
+                if res.get("ok"):
+                    succeeded = True
+                    break
+                chk = run_lpac_command(["profile", "list"], slot=slot, timeout_sec=25, session=sess)
+                if chk.get("ok") and isinstance(chk.get("data"), list):
+                    for p in chk["data"]:
+                        pid = re.sub(r"[^0-9A-Fa-f]", "", str(p.get("iccid") or "")).upper()
+                        paid = re.sub(r"[^0-9A-Fa-f]", "", str(p.get("isdpAid") or "")).upper()
+                        if (clean_id and pid == clean_id) or (aid_clean and paid == aid_clean):
+                            st = str(p.get("profileState") or "").lower()
+                            if (verb == "enable" and st == "enabled") or (verb == "disable" and st == "disabled"):
+                                succeeded = True
+                                break
+                if succeeded:
+                    break
+            if succeeded and auto_notify:
+                nr = run_lpac_command(["notification", "process", "-a", "-r"], slot=slot, timeout_sec=45, session=sess)
+                notif_status = {"ok": nr.get("ok", 0), "error": nr.get("error", "")}
+    except Exception as e:
+        return {"ok": 0, "error": str(e)}
+
+    if not succeeded:
+        return {"ok": 0, "error": (last_res or {}).get("error") or f"{verb} Profile 失败"}
+
+    refresh_slot_usim_after_switch(slot=slot)
+
+    return {
+        "ok": 1,
+        "slot": int(slot),
+        "iccid": clean_id,
+        "action": verb,
+        "notification_sync": notif_status,
+        "msg": f"已{'启用' if verb == 'enable' else '停用'}号码 {mask_iccid(clean_id)}",
+    }
+
+
+def delete_profile(slot, iccid, isdp_aid="", auto_notify=True):
+    clean_id = re.sub(r"[^0-9A-Fa-f]", "", str(iccid or "")).upper()
+    aid_clean = re.sub(r"[^0-9A-Fa-f]", "", str(isdp_aid or "")).upper()
+    if len(clean_id) < 15:
+        return {"ok": 0, "error": "无效的 ICCID"}
+
+    plist = run_lpac_command(["profile", "list"], slot=slot, timeout_sec=30)
+    if plist.get("ok") and isinstance(plist.get("data"), list):
+        for p in plist["data"]:
+            pid = re.sub(r"[^0-9A-Fa-f]", "", str(p.get("iccid") or "")).upper()
+            if pid == clean_id and str(p.get("profileState") or "").lower() == "enabled":
+                aid_clean = aid_clean or str(p.get("isdpAid") or "").upper()
+                dis = switch_profile_state(slot, clean_id, action="disable", isdp_aid=aid_clean, auto_notify=False)
+                if not dis.get("ok"):
+                    return {"ok": 0, "error": f"删除前自动停用该号码失败: {dis.get('error')}"}
+                break
+
+    notif_status = None
+    try:
+        with Mu300PtyAtSession(slot=slot) as sess:
+            res = run_lpac_command(["profile", "delete", clean_id], slot=slot, timeout_sec=45, session=sess)
+            if not res.get("ok") and aid_clean:
+                res = run_lpac_command(["profile", "delete", aid_clean], slot=slot, timeout_sec=45, session=sess)
+            if not res.get("ok"):
+                return {"ok": 0, "error": res.get("error") or "删除 eSIM 号码失败"}
+            if auto_notify:
+                nr = run_lpac_command(["notification", "process", "-a", "-r"], slot=slot, timeout_sec=50, session=sess)
+                notif_status = {"ok": nr.get("ok", 0), "error": nr.get("error", "")}
+    except Exception as e:
+        return {"ok": 0, "error": str(e)}
+
+    meta = load_json_dict(META_FILE, {"chips": {}, "nicknames": {}})
+    if isinstance(meta.get("nicknames"), dict) and clean_id in meta["nicknames"]:
+        meta["nicknames"].pop(clean_id, None)
+        atomic_write_json(META_FILE, meta, mode=0o600)
+
+    return {
+        "ok": 1,
+        "slot": int(slot),
+        "iccid": clean_id,
+        "notification_sync": notif_status,
+        "msg": f"已从芯片永久删除号码 {mask_iccid(clean_id)}" + ("（已同步向运营商发送释放回执）" if (notif_status and notif_status.get("ok")) else ""),
+    }
+
+
+def set_profile_nickname(slot, iccid, nickname):
+    clean_id = re.sub(r"[^0-9A-Fa-f]", "", str(iccid or "")).upper()
+    if len(clean_id) < 15:
+        return {"ok": 0, "error": "无效的 ICCID"}
+    nick_str = re.sub(r"[\r\n\x00]", " ", str(nickname or "")).strip()[:48]
+
+    meta = load_json_dict(META_FILE, {"chips": {}, "nicknames": {}})
+    nicks = meta.setdefault("nicknames", {})
+    if nick_str:
+        nicks[clean_id] = nick_str
+    else:
+        nicks.pop(clean_id, None)
+    atomic_write_json(META_FILE, meta, mode=0o600)
+
+    cards_db = load_json_dict(SIM_CARDS_FILE, {"cards": {}})
+    cards = cards_db.setdefault("cards", {})
+    rec = dict(cards.get(clean_id) or {})
+    rec["nickname"] = nick_str
+    rec["updated_at"] = int(time.time())
+    cards[clean_id] = rec
+    atomic_write_json(SIM_CARDS_FILE, cards_db, mode=0o600)
+
+    chip_nick = nick_str.encode("utf-8")[:60].decode("utf-8", errors="ignore")
+    chip_res = run_lpac_command(["profile", "nickname", clean_id, chip_nick], slot=slot, timeout_sec=25)
+    return {
+        "ok": 1,
+        "iccid": clean_id,
+        "nickname": nick_str,
+        "chip_written": bool(chip_res.get("ok")),
+        "msg": f"备注已更新为「{nick_str or '（已清空）'}」",
+    }
+
+
+def download_profile(
+    slot=2,
+    activation_code="",
+    smdp="",
+    matching_id="",
+    confirmation_code="",
+    imei="",
+    nickname="",
+    auto_enable=False,
+    auto_notify=True,
+    progress_cb=None,
+):
+    parsed = parse_lpa_activation_code(activation_code, smdp, matching_id, confirmation_code)
+    if not parsed.get("ok"):
+        return parsed
+
+    imei_clean = re.sub(r"[^0-9]", "", str(imei or ""))
+    if imei_clean and len(imei_clean) not in (14, 15, 16):
+        return {"ok": 0, "error": "附带的 IMEI 长度需为 15 位数字（留空则不发送 IMEI）"}
+
+    dl_args = ["profile", "download", "-s", parsed["smdp"]]
+    if parsed["matching_id"]:
+        dl_args.extend(["-m", parsed["matching_id"]])
+    if parsed["confirmation_code"]:
+        dl_args.extend(["-c", parsed["confirmation_code"]])
+    if imei_clean:
+        dl_args.extend(["-i", imei_clean])
+
+    before_ids = set()
+    new_iccid = ""
+    new_aid = ""
+    notif_sync = None
+    apdu_total = 0
+
+    try:
+        with Mu300PtyAtSession(slot=slot, progress_cb=progress_cb) as sess:
+            pre = run_lpac_command(["profile", "list"], slot=slot, timeout_sec=30, session=sess)
+            if pre.get("ok") and isinstance(pre.get("data"), list):
+                for p in pre["data"]:
+                    if isinstance(p, dict) and p.get("iccid"):
+                        before_ids.add(re.sub(r"[^0-9A-Fa-f]", "", str(p["iccid"])).upper())
+
+            if progress_cb:
+                progress_cb("starting", f"正在连接 {parsed['smdp']} 准备下载写入卡 {slot}...", 0)
+
+            dl_res = run_lpac_command(dl_args, slot=slot, timeout_sec=240, mss=180, session=sess)
+            if not dl_res.get("ok"):
+                return {
+                    "ok": 0,
+                    "error": dl_res.get("error") or "下载写入 eSIM 失败",
+                    "smdp": parsed["smdp"],
+                }
+            apdu_total = dl_res.get("apdu_count", 0)
+
+            post = run_lpac_command(["profile", "list"], slot=slot, timeout_sec=30, session=sess)
+            if post.get("ok") and isinstance(post.get("data"), list):
+                for p in post["data"]:
+                    if isinstance(p, dict) and p.get("iccid"):
+                        cid = re.sub(r"[^0-9A-Fa-f]", "", str(p["iccid"])).upper()
+                        if cid and cid not in before_ids:
+                            new_iccid = cid
+                            new_aid = str(p.get("isdpAid") or "").upper()
+                            break
+
+            if auto_notify:
+                if progress_cb:
+                    progress_cb("notify", "正在向运营商同步安装完成回执...", apdu_total)
+                nr = run_lpac_command(["notification", "process", "-a", "-r"], slot=slot, timeout_sec=50, session=sess)
+                notif_sync = {"ok": nr.get("ok", 0), "error": nr.get("error", "")}
+    except Exception as e:
+        return {"ok": 0, "error": str(e)}
+
+    if nickname and new_iccid:
+        if progress_cb:
+            progress_cb("nickname", f"正在保存号码备注「{nickname}」...", apdu_total)
+        set_profile_nickname(slot, new_iccid, nickname)
+
+    enable_res = None
+    if auto_enable and new_iccid:
+        if progress_cb:
+            progress_cb("enable", "正在自动启用新写入的 eSIM 号码...", apdu_total)
+        enable_res = switch_profile_state(slot, new_iccid, action="enable", isdp_aid=new_aid, auto_notify=auto_notify)
+
+    return {
+        "ok": 1,
+        "slot": int(slot),
+        "smdp": parsed["smdp"],
+        "new_iccid": new_iccid,
+        "new_iccid_masked": mask_iccid(new_iccid),
+        "apdu_count": apdu_total,
+        "notification_sync": notif_sync,
+        "enabled": bool(enable_res and enable_res.get("ok")),
+        "msg": f"eSIM 写入成功！卡号: {mask_iccid(new_iccid) or '已落盘'}",
+    }
+
+
+def process_notifications(slot=2, seq=None, remove_after=True):
+    args = ["notification", "process"]
+    if remove_after:
+        args.append("-r")
+    if seq is None or str(seq).strip() in ("", "all"):
+        args.append("-a")
+    else:
+        args.append(str(int(seq)))
+    res = run_lpac_command(args, slot=slot, timeout_sec=60)
+    if not res.get("ok"):
+        return {"ok": 0, "error": res.get("error") or "上报通知回执失败"}
+    return {"ok": 1, "msg": "运营商通知回执已成功上报" + ("并清理" if remove_after else "")}
+
+
+def remove_notifications(slot=2, seq=None):
+    args = ["notification", "remove"]
+    if seq is None or str(seq).strip() in ("", "all"):
+        args.append("-a")
+    else:
+        args.append(str(int(seq)))
+    res = run_lpac_command(args, slot=slot, timeout_sec=30)
+    if not res.get("ok"):
+        return {"ok": 0, "error": res.get("error") or "移除通知记录失败"}
+    return {"ok": 1, "msg": "芯片内待处理通知记录已移除"}
+
+
+def set_default_smdp_addr(slot=2, smdp=""):
+    addr = re.sub(r"^https?://", "", str(smdp or "").strip(), flags=re.I).strip("/")
+    if not addr or not re.fullmatch(r"[A-Za-z0-9._-]+(?::[0-9]{1,5})?", addr):
+        return {"ok": 0, "error": "请输入有效的默认 SM-DP+ 域名"}
+    res = run_lpac_command(["chip", "defaultsmdp", addr], slot=slot, timeout_sec=30)
+    if not res.get("ok"):
+        return {"ok": 0, "error": res.get("error") or "修改默认 SM-DP+ 地址失败"}
+    return {"ok": 1, "default_smdp": addr, "msg": f"已将芯片默认 SM-DP+ 服务器设为 {addr}"}
+
+
+def main():
+    parser = argparse.ArgumentParser(description="U30 Air eUICC (eSIM) Manager")
+    parser.add_argument("cmd", choices=[
+        "info", "enable", "disable", "delete", "nickname",
+        "download", "notif-process", "notif-remove", "set-smdp", "parse-lpa",
+    ])
+    parser.add_argument("--slot", type=int, default=2, choices=[1, 2])
+    parser.add_argument("--iccid", default="")
+    parser.add_argument("--aid", default="")
+    parser.add_argument("--nickname", default="")
+    parser.add_argument("--lpa", default="")
+    parser.add_argument("--smdp", default="")
+    parser.add_argument("--matching-id", default="")
+    parser.add_argument("--confirmation-code", default="")
+    parser.add_argument("--imei", default="")
+    parser.add_argument("--seq", default="all")
+    parser.add_argument("--auto-enable", action="store_true")
+    parser.add_argument("--no-notify", action="store_true")
+    args = parser.parse_args()
+
+    if args.cmd == "parse-lpa":
+        out = parse_lpa_activation_code(args.lpa, args.smdp, args.matching_id, args.confirmation_code)
+    elif args.cmd == "info":
+        out = get_full_euicc_overview(slot=args.slot)
+    elif args.cmd in ("enable", "disable"):
+        out = switch_profile_state(args.slot, args.iccid, action=args.cmd, isdp_aid=args.aid, auto_notify=not args.no_notify)
+    elif args.cmd == "delete":
+        out = delete_profile(args.slot, args.iccid, isdp_aid=args.aid, auto_notify=not args.no_notify)
+    elif args.cmd == "nickname":
+        out = set_profile_nickname(args.slot, args.iccid, args.nickname)
+    elif args.cmd == "download":
+        out = download_profile(
+            slot=args.slot,
+            activation_code=args.lpa,
+            smdp=args.smdp,
+            matching_id=args.matching_id,
+            confirmation_code=args.confirmation_code,
+            imei=args.imei,
+            nickname=args.nickname,
+            auto_enable=args.auto_enable,
+            auto_notify=not args.no_notify,
+        )
+    elif args.cmd == "notif-process":
+        out = process_notifications(slot=args.slot, seq=args.seq, remove_after=True)
+    elif args.cmd == "notif-remove":
+        out = remove_notifications(slot=args.slot, seq=args.seq)
+    elif args.cmd == "set-smdp":
+        out = set_default_smdp_addr(slot=args.slot, smdp=args.smdp)
+    else:
+        out = {"ok": 0, "error": "unknown command"}
+
+    sys.stdout.write(json.dumps(out, ensure_ascii=False) + "\n")
+    sys.exit(0 if out.get("ok") else 1)
+
+
+if __name__ == "__main__":
+    main()

@@ -161,6 +161,12 @@ def deploy(target_host: str = None, check_only: bool = False, with_runtime: bool
             upload_text_lf(sftp, ROOT_DIR / "install.sh", f"{REMOTE_TMP_DIR}/install.sh")
             upload_text_lf(sftp, ROOT_DIR / "uninstall.sh", f"{REMOTE_TMP_DIR}/uninstall.sh")
             upload_tree(sftp, LOCAL_DIR, f"{REMOTE_TMP_DIR}/u30air-webui")
+            src_euicc = RUNTIME_BASE / "opt-mu300/bin/mu300-euicc"
+            src_lpac = RUNTIME_BASE / "opt-mu300/bin/lpac"
+            if src_euicc.exists():
+                upload_text_lf(sftp, src_euicc, f"{REMOTE_TMP_DIR}/mu300-euicc")
+            if src_lpac.exists():
+                sftp.put(str(src_lpac), f"{REMOTE_TMP_DIR}/lpac")
             if with_runtime and RUNTIME_BASE.exists():
                 print("[*] Uploading standalone runtime & patched VPN scripts ...")
                 for idx, (lpath, _, _) in enumerate(runtime_sync_list):
@@ -190,7 +196,12 @@ def deploy(target_host: str = None, check_only: bool = False, with_runtime: bool
             rt_install_cmds = " && ".join(lines) + " && "
 
         print("[*] Running installer on device ...")
-        run_sudo(ssh, password, f"{rt_install_cmds}bash {REMOTE_TMP_DIR}/install.sh --all -y && rm -rf {REMOTE_TMP_DIR}")
+        euicc_install_cmd = (
+            f"mkdir -p /opt/mu300/bin && "
+            f"if [ -f {REMOTE_TMP_DIR}/mu300-euicc ]; then install -o root -g root -m 755 {REMOTE_TMP_DIR}/mu300-euicc /opt/mu300/bin/mu300-euicc && ln -sf /opt/mu300/bin/mu300-euicc /usr/local/bin/mu300-euicc; fi && "
+            f"if [ -f {REMOTE_TMP_DIR}/lpac ]; then install -o root -g root -m 755 {REMOTE_TMP_DIR}/lpac /opt/mu300/bin/lpac; fi && "
+        )
+        run_sudo(ssh, password, f"{rt_install_cmds}{euicc_install_cmd}bash {REMOTE_TMP_DIR}/install.sh --all -y && rm -rf {REMOTE_TMP_DIR}")
         print(f"\n[OK] Deployment finished! Open http://{host}:8080/ in your browser.")
     finally:
         ssh.close()

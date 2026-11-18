@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>U30 Air 5G · 智能控制台</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0' stop-color='%2306b6d4'/%3E%3Cstop offset='1' stop-color='%234f46e5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Ctext x='32' y='41' text-anchor='middle' fill='%23fff' font-family='system-ui,sans-serif' font-weight='900' font-size='26'%3E5G%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/app.css?v=e0c5486a">
+  <link rel="stylesheet" href="/app.css?v=9d7d813e">
 </head>
 <body class="bg-[#0b0f19] text-slate-200 font-sans antialiased min-h-screen flex flex-col scrollbar-thin selection:bg-cyan-500 selection:text-white relative">
 
@@ -103,6 +103,7 @@
       <nav class="flex space-x-1 border-t border-slate-800/60 py-1.5 text-xs font-medium" id="tab-nav-bar">
         <button onclick="switchTab('overview')" class="tab-btn nav-tab-active px-3 py-1.5 rounded-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap" data-tab="overview">概览</button>
         <button onclick="switchTab('network')" class="tab-btn px-3 py-1.5 rounded-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap" data-tab="network">移动网络</button>
+        <button onclick="switchTab('esim')" class="tab-btn px-3 py-1.5 rounded-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap flex items-center gap-1" data-tab="esim">eSIM 写卡 <span id="nav-esim-count" class="hidden px-1.5 py-0.5 rounded-full text-[10px] bg-purple-500/20 text-purple-300 border border-purple-500/30 font-mono">0</span></button>
         <button onclick="switchTab('sms')" class="tab-btn px-3 py-1.5 rounded-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap" data-tab="sms">短信</button>
         <button onclick="switchTab('at')" class="tab-btn px-3 py-1.5 rounded-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap" data-tab="at">AT 终端</button>
         <button onclick="switchTab('traffic')" class="tab-btn px-3 py-1.5 rounded-lg border-b-2 border-transparent text-slate-400 hover:text-slate-200 transition whitespace-nowrap" data-tab="traffic">流量统计</button>
@@ -847,6 +848,211 @@
                   <span class="text-slate-200 font-medium">允许该卡数据漫游 (海外卡必开)</span>
                 </label>
               </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <!-- ========================================================================= -->
+    <!-- 2.5 实体 eUICC (9eSIM / ESTK / 5ber / 英飞凌白卡) 扫码写卡与多号管理中心 -->
+    <!-- ========================================================================= -->
+    <section id="panel-esim" class="tab-panel space-y-5 hidden">
+      <!-- 顶部芯片状态与剩余闪存看板 -->
+      <div class="glass-card rounded-2xl p-5 space-y-4">
+        <div class="flex flex-col lg:flex-row lg:items-center justify-between gap-3 pb-3 border-b border-slate-800/80">
+          <div>
+            <div class="flex flex-wrap items-center gap-2">
+              <h3 class="font-semibold text-white text-base flex items-center gap-2">
+                <span class="text-purple-400">✨</span> eUICC 实体 eSIM 扫码写卡与多号管理中心
+              </h3>
+              <span id="esim-chip-badge" class="px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-purple-500/15 text-purple-300 border border-purple-500/30">
+                等待读取芯片...
+              </span>
+            </div>
+            <p class="text-xs text-slate-400 mt-1">
+              无需外置读卡器、主流量卡<strong class="text-emerald-300">全程不断网</strong>：通过展锐独立 AT 通道直接向白卡写入全球海外运营商 eSIM，支持一键切号与闪切收码联动。
+            </p>
+          </div>
+          <div class="flex flex-wrap items-center gap-2 shrink-0">
+            <select id="esim-slot-select" onchange="onEsimSlotChange()" class="bg-slate-900 border border-slate-700 rounded-xl px-3 py-1.5 text-xs text-cyan-300 font-mono focus:outline-none focus:border-cyan-500">
+              <option value="2" selected>目标卡槽: SIM 2 (内置/改装槽)</option>
+              <option value="1">目标卡槽: SIM 1 (外置卡槽)</option>
+            </select>
+            <button onclick="loadEsimOverview(true)" id="btn-esim-refresh" class="px-3.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 text-xs font-semibold transition">
+              🔄 刷新芯片与号码
+            </button>
+          </div>
+        </div>
+
+        <!-- 芯片 4 维核心指标条 -->
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3 text-xs">
+          <div class="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+            <div class="flex items-center justify-between text-[11px] text-slate-400">
+              <span>卡片 32 位 EID</span>
+              <button onclick="copyEsimEid()" class="text-cyan-400 hover:text-cyan-300 font-mono">复制完整 EID 📋</button>
+            </div>
+            <div id="esim-eid-text" class="font-mono font-bold text-white text-xs truncate select-all">--</div>
+            <div id="esim-cert-sub" class="text-[10px] text-slate-500 font-mono">GSMA SGP.22 标准认证</div>
+          </div>
+
+          <div class="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1.5">
+            <div class="flex items-center justify-between text-[11px]">
+              <span class="text-slate-400">芯片剩余空间 (NVRAM)</span>
+              <span id="esim-free-kb" class="font-mono font-bold text-emerald-400">-- KB</span>
+            </div>
+            <div class="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+              <div id="esim-cap-bar" class="h-full bg-gradient-to-r from-purple-500 to-cyan-400 transition-all duration-500" style="width: 0%"></div>
+            </div>
+            <div id="esim-tier-hint" class="text-[10px] text-slate-400 font-mono">自动评估剩余可写号码数量</div>
+          </div>
+
+          <div class="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+            <div class="text-[11px] text-slate-400">卡内已存号码数</div>
+            <div class="flex items-baseline gap-2">
+              <span id="esim-prof-count" class="text-base font-black font-mono text-white">0</span>
+              <span class="text-[11px] text-slate-400">张海外配置</span>
+            </div>
+            <div id="esim-active-prof-hint" class="text-[10px] text-cyan-300 font-mono truncate">当前启用: 尚未写入</div>
+          </div>
+
+          <div class="p-3.5 rounded-xl bg-slate-900/80 border border-slate-800 space-y-1">
+            <div class="text-[11px] text-slate-400">固件与 SAS 安全认证</div>
+            <div id="esim-sas-text" class="font-mono font-bold text-purple-300 text-xs truncate">--</div>
+            <div id="esim-svn-text" class="text-[10px] text-slate-400 font-mono">SGP.22 -- · FW --</div>
+          </div>
+        </div>
+
+        <!-- 异步下载写卡实时进度横幅 -->
+        <div id="esim-dl-banner" class="hidden p-4 rounded-2xl bg-purple-950/40 border border-purple-500/40 space-y-2.5 text-xs">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+            <div class="flex items-center gap-2.5">
+              <span id="esim-dl-dot" class="w-2.5 h-2.5 rounded-full bg-purple-400 animate-ping shrink-0"></span>
+              <div>
+                <div id="esim-dl-title" class="font-bold text-purple-200">正在下载并向白卡写入 eSIM 配置...</div>
+                <div id="esim-dl-msg" class="text-[11px] text-cyan-300 font-mono mt-0.5">准备连接 SM-DP+ 服务器...</div>
+              </div>
+            </div>
+            <div class="flex items-center gap-2 font-mono text-[11px] shrink-0">
+              <span id="esim-dl-apdu" class="px-2 py-0.5 rounded bg-slate-900 text-emerald-300 border border-slate-700">0 APDU</span>
+              <span id="esim-dl-elapsed" class="px-2 py-0.5 rounded bg-slate-900 text-amber-300 border border-slate-700">0.0s</span>
+            </div>
+          </div>
+          <div id="esim-dl-logs" class="max-h-28 overflow-y-auto scrollbar-thin bg-black/70 border border-slate-800 rounded-xl p-2.5 font-mono text-[11px] text-slate-300 space-y-0.5"></div>
+        </div>
+      </div>
+
+      <!-- 主体双栏：左侧扫码/激活码写卡表单 + 右侧芯片号码仓库与回执管理 -->
+      <div class="grid grid-cols-1 lg:grid-cols-12 gap-5 items-start">
+        <!-- 左栏 (5列)：免读卡器扫码 / 粘贴激活码下载写卡 -->
+        <div class="lg:col-span-5 glass-card rounded-2xl p-5 space-y-4 text-xs">
+          <div class="pb-2.5 border-b border-slate-800">
+            <h4 class="font-semibold text-white text-sm flex items-center gap-2">
+              <span>📲</span> 下载写入新 eSIM 号码
+            </h4>
+            <p class="text-[11px] text-slate-400 mt-0.5">拖入/粘贴运营商邮件里的二维码图片，或直接填写 LPA 激活码</p>
+          </div>
+
+          <!-- 离线二维码拖拽 / 粘贴 / 上传区 -->
+          <div id="esim-qr-dropzone" onclick="document.getElementById('esim-qr-file').click()" ondragover="onEsimQrDragOver(event)" ondragleave="onEsimQrDragLeave(event)" ondrop="onEsimQrDrop(event)" class="p-4 rounded-2xl border-2 border-dashed border-slate-700 hover:border-cyan-400/70 bg-slate-900/60 hover:bg-slate-900/90 cursor-pointer transition text-center space-y-1.5 select-none">
+            <input type="file" id="esim-qr-file" accept="image/*" class="hidden" onchange="onEsimQrFileSelect(event)">
+            <div class="text-2xl">📷</div>
+            <div class="font-semibold text-slate-200">点击选择二维码图片 / 拖拽至此 / 直接 Ctrl+V 粘贴截图</div>
+            <div id="esim-qr-status" class="text-[11px] text-slate-400">100% 浏览器本地离线解码，二维码图片不会上传至任何第三方</div>
+          </div>
+
+          <div class="space-y-3">
+            <div>
+              <div class="flex items-center justify-between mb-1">
+                <label class="text-slate-300 font-medium">LPA 完整激活码串 <span class="text-slate-500 font-normal">(扫码自动填入)</span></label>
+                <button type="button" onclick="clearEsimForm()" class="text-[11px] text-slate-400 hover:text-white">清空</button>
+              </div>
+              <input type="text" id="esim-lpa-input" oninput="onEsimLpaInput()" placeholder="LPA:1$rsp.truphone.com$MATCHING-ID" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-2 text-cyan-300 font-mono focus:outline-none focus:border-cyan-500">
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label class="text-slate-400 block mb-1">SM-DP+ 服务器地址</label>
+                <input type="text" id="esim-smdp-input" oninput="syncLpaFromParts()" placeholder="例如 rsp.truphone.com" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono focus:outline-none focus:border-cyan-500">
+              </div>
+              <div>
+                <label class="text-slate-400 block mb-1">激活码 (Matching ID)</label>
+                <input type="text" id="esim-mid-input" oninput="syncLpaFromParts()" placeholder="例如 QR-G-5C-..." class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono focus:outline-none focus:border-cyan-500">
+              </div>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+              <div>
+                <label class="text-slate-400 block mb-1">自定义号码备注 <span class="text-slate-500">(推荐)</span></label>
+                <input type="text" id="esim-nick-input" placeholder="例如: 🇭🇰 ClubSim 保号 / 🇬🇧 Giffgaff" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white focus:outline-none focus:border-cyan-500">
+              </div>
+              <div>
+                <label class="text-slate-400 block mb-1">确认码 Confirmation Code</label>
+                <input type="text" id="esim-cc-input" placeholder="绝大多数运营商留空即可" class="w-full bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono focus:outline-none focus:border-cyan-500">
+              </div>
+            </div>
+
+            <div class="space-y-2 pt-1">
+              <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                <input type="checkbox" id="esim-auto-enable" checked class="rounded border-slate-700 text-emerald-500 focus:ring-0">
+                <span>写入成功后<strong class="text-emerald-300">立即启用该号码</strong>（自动切换为当前激活 Profile）</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer text-slate-300">
+                <input type="checkbox" id="esim-auto-notify" checked class="rounded border-slate-700 text-cyan-500 focus:ring-0">
+                <span>自动向运营商上报安装回执（推荐开启，确保运营商后台立即激活）</span>
+              </label>
+              <label class="flex items-center gap-2 cursor-pointer text-slate-400">
+                <input type="checkbox" id="esim-attach-imei" class="rounded border-slate-700 text-purple-500 focus:ring-0">
+                <span>向服务器附带本机 15 位 IMEI（仅美国 Tello 等校验设备串号的运营商需勾选）</span>
+              </label>
+            </div>
+
+            <button onclick="submitEsimDownload()" id="btn-esim-download" class="w-full py-2.5 rounded-xl bg-gradient-to-r from-purple-600 to-cyan-500 hover:from-purple-500 hover:to-cyan-400 text-white font-bold shadow-lg shadow-purple-900/30 transition">
+              ⚡ 免读卡器立即下载并写入白卡
+            </button>
+          </div>
+        </div>
+
+        <!-- 右栏 (7列)：芯片内号码列表 (启用/停用/改名/删除/闪切收码) + 通知队列 -->
+        <div class="lg:col-span-7 space-y-5">
+          <div class="glass-card rounded-2xl p-5 space-y-4 text-xs">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+              <div>
+                <h4 class="font-semibold text-white text-sm flex items-center gap-2">
+                  <span>🗂️</span> 白卡内已存 eSIM 号码列表
+                </h4>
+                <p class="text-[11px] text-slate-400 mt-0.5">同一时刻可启用 1 张号码；启用后可直接点「⏱️ 闪切收码」接收海外短信，主卡全程不断网</p>
+              </div>
+            </div>
+
+            <div id="esim-profiles-list" class="space-y-3">
+              <div class="p-8 text-center text-slate-500 bg-slate-900/40 rounded-2xl border border-slate-800/60">
+                点击进入页面自动读取芯片内号码仓库...
+              </div>
+            </div>
+          </div>
+
+          <!-- 运营商通知回执队列 (Notifications) 与默认 SM-DP+ 管理 -->
+          <div class="glass-card rounded-2xl p-5 space-y-3.5 text-xs">
+            <div class="flex flex-wrap items-center justify-between gap-2 pb-2.5 border-b border-slate-800">
+              <div class="flex items-center gap-2">
+                <h4 class="font-semibold text-white text-sm">📬 运营商通知回执队列 (GSMA Notification)</h4>
+                <span id="esim-notif-badge" class="px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700">0 条待处理</span>
+              </div>
+              <div class="flex items-center gap-2">
+                <button onclick="processEsimNotifications('all')" class="px-2.5 py-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 font-semibold transition">
+                  📤 一键上报并清理全部
+                </button>
+                <button onclick="removeEsimNotifications('all')" class="px-2.5 py-1 rounded-lg bg-slate-800 hover:bg-rose-950/60 text-slate-400 hover:text-rose-300 border border-slate-700 transition">
+                  仅本地清空
+                </button>
+              </div>
+            </div>
+            <p class="text-[11px] text-slate-400 leading-relaxed">
+              提示：删除支持换机补发的海外 eSIM 时，向运营商上报 <code class="text-cyan-300">delete</code> 回执后原二维码额度才会释放；日常开启上方「自动上报回执」即可自动完成。
+            </p>
+            <div id="esim-notifs-list" class="space-y-2 max-h-44 overflow-y-auto scrollbar-thin">
+              <div class="text-slate-500 text-center py-2">当前芯片无积压通知回执</div>
             </div>
           </div>
         </div>
@@ -2036,6 +2242,6 @@
   </div>
 
   <!-- 核心逻辑脚本 (模块化外置强缓存) -->
-  <script src="/app.js?v=e4aa7d14" defer></script>
+  <script src="/app.js?v=4f3af31f" defer></script>
 </body>
 </html>

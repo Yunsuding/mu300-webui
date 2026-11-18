@@ -61,6 +61,8 @@ CORE_RUNTIME_FILES = [
     ("opt-mu300/bin/mobile-data", "/opt/mu300/bin/mobile-data", 0o755),
     ("opt-mu300/bin/sms", "/opt/mu300/bin/sms", 0o755),
     ("opt-mu300/bin/mu300-ussd", "/opt/mu300/bin/mu300-ussd", 0o755),
+    ("opt-mu300/bin/mu300-euicc", "/opt/mu300/bin/mu300-euicc", 0o755),
+    ("opt-mu300/bin/lpac", "/opt/mu300/bin/lpac", 0o755),
     ("systemd/u30air-uplink-ready.service", "/etc/systemd/system/u30air-uplink-ready.service", 0o644),
     ("systemd/mu300-atd4.service", "/etc/systemd/system/mu300-atd4.service", 0o644),
     ("systemd/mu300-atd5.service", "/etc/systemd/system/mu300-atd5.service", 0o644),
@@ -82,6 +84,7 @@ WEBUI_FILES = [
     (ROOT / "u30air-webui/web/index.html", "/opt/u30air-webui/web/index.html", 0o644),
     (ROOT / "u30air-webui/web/app.css", "/opt/u30air-webui/web/app.css", 0o644),
     (ROOT / "u30air-webui/web/app.js", "/opt/u30air-webui/web/app.js", 0o644),
+    (ROOT / "u30air-webui/web/jsqr.min.js", "/opt/u30air-webui/web/jsqr.min.js", 0o644),
     (ROOT / "u30air-webui/service/u30air-webui.service", "/etc/systemd/system/u30air-webui.service", 0o644),
     (ROOT / "u30air-webui/bin/mu300-mihomo", "/usr/local/bin/mu300-mihomo", 0o755),
     (ROOT / "u30air-webui/bin/mu300-mihomo", "/opt/mu300/bin/mu300-mihomo", 0o755),
@@ -111,7 +114,9 @@ def build_stage_tar(extra_vpn_dir: Path, power_conf_override: bool, personal_bac
         # 1. Core runtime files
         for repo_rel, remote_dest, mode in CORE_RUNTIME_FILES:
             src = RUNTIME_DIR / repo_rel
-            raw = src.read_bytes().replace(b"\r\n", b"\n")
+            raw = src.read_bytes()
+            if not raw.startswith(b"\x7fELF"):
+                raw = raw.replace(b"\r\n", b"\n")
             add_item(raw, remote_dest, mode)
 
         # 2. Patched VPN scripts overlay (/mnt/mu300-disk/extra/vpn/*)

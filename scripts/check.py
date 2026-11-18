@@ -45,6 +45,7 @@ def verify_python_syntax():
         *ROOT.glob("standalone/*.py"),
         ROOT / "u30air-webui" / "server.py",
         ROOT / "u30air-webui" / "bin" / "mu300-mihomo",
+        ROOT / "standalone" / "device-runtime" / "opt-mu300" / "bin" / "mu300-euicc",
     ]
     checked = 0
     for path in py_targets:
@@ -56,9 +57,12 @@ def verify_python_syntax():
 
 def verify_webui_inline_js():
     app_js = ROOT / "u30air-webui" / "web" / "app.js"
+    jsqr_js = ROOT / "u30air-webui" / "web" / "jsqr.min.js"
     app_css = ROOT / "u30air-webui" / "web" / "app.css"
     assert app_css.exists() and app_css.stat().st_size > 10000, "Missing or empty precompiled app.css"
+    assert jsqr_js.exists() and jsqr_js.stat().st_size > 50000, "Missing offline jsqr.min.js"
     subprocess.run(["node", "--check", str(app_js)], check=True)
+    subprocess.run(["node", "--check", str(jsqr_js)], check=True)
     index_html = ROOT / "u30air-webui" / "web" / "index.html"
     parser = InlineScriptExtractor()
     parser.feed(index_html.read_text(encoding="utf-8"))

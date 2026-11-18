@@ -55,3 +55,10 @@ The offline flashing Release bundles (`mu300-kernel.tar.gz`, `mu300-ubuntu-rootf
 ## 4. Tailwind CSS Utility Stylesheet (MIT License)
 
 - `u30air-webui/web/app.css`: Precompiled offline utility stylesheet generated with Tailwind CSS (https://github.com/tailwindlabs/tailwindcss) — Licensed under the **MIT License** (`Copyright (c) Tailwind Labs, Inc.`).
+
+---
+
+## 5. `lpac` & `jsQR` (Phase 2 Physical eUICC Management)
+
+- **`lpac` (`standalone/device-runtime/opt-mu300/bin/lpac`)**: Official unmodified ARM64 Linux CLI binary from https://github.com/estkme-group/lpac (`v2.3.0`), invoked as an independent external user-space process (`libeuicc` & `lpac` under **GNU Lesser General Public License v2.1 (LGPL-2.1)**; `cJSON` under **MIT License**). Complete source code is available at https://github.com/estkme-group/lpac.
+- **`jsQR` (`u30air-webui/web/jsqr.min.js`)**: Pure JavaScript browser QR code reader from https://github.com/cozmo/jsQR (`v1.4.0`) — Licensed under the **Apache License 2.0**.

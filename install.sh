@@ -110,9 +110,23 @@ cp -f "${SRC_DIR}/server.py" "${INSTALL_DIR}/server.py"
 cp -f "${SRC_DIR}/web/index.html" "${INSTALL_DIR}/web/index.html"
 cp -f "${SRC_DIR}/web/app.css" "${INSTALL_DIR}/web/app.css"
 cp -f "${SRC_DIR}/web/app.js" "${INSTALL_DIR}/web/app.js"
+if [[ -f "${SRC_DIR}/web/jsqr.min.js" ]]; then
+  cp -f "${SRC_DIR}/web/jsqr.min.js" "${INSTALL_DIR}/web/jsqr.min.js"
+fi
 rm -f "${INSTALL_DIR}/web/tailwindcss.js"
 cp -f "${SRC_DIR}/bin/mu300-mihomo" "${INSTALL_DIR}/bin/mu300-mihomo"
 cp -f "${SRC_DIR}/bin/mu300-sqc-charge" "${INSTALL_DIR}/bin/mu300-sqc-charge"
+if [[ -f "${SCRIPT_DIR}/standalone/device-runtime/opt-mu300/bin/mu300-euicc" ]]; then
+  mkdir -p "${MU300_BIN_DIR}"
+  cp -f "${SCRIPT_DIR}/standalone/device-runtime/opt-mu300/bin/mu300-euicc" "${MU300_BIN_DIR}/mu300-euicc"
+  chmod 755 "${MU300_BIN_DIR}/mu300-euicc"
+  ln -sf "${MU300_BIN_DIR}/mu300-euicc" /usr/local/bin/mu300-euicc
+fi
+if [[ -f "${SCRIPT_DIR}/standalone/device-runtime/opt-mu300/bin/lpac" ]]; then
+  mkdir -p "${MU300_BIN_DIR}"
+  cp -f "${SCRIPT_DIR}/standalone/device-runtime/opt-mu300/bin/lpac" "${MU300_BIN_DIR}/lpac"
+  chmod 755 "${MU300_BIN_DIR}/lpac"
+fi
 cp -f "${SRC_DIR}/service/"* "${INSTALL_DIR}/service/"
 chmod 755 "${INSTALL_DIR}/server.py" "${INSTALL_DIR}/bin/mu300-mihomo" "${INSTALL_DIR}/bin/mu300-sqc-charge"
 

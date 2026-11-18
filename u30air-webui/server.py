@@ -2426,6 +2426,158 @@ def remove_vpn_subscription(req):
     build_merged_vpn_config(apply_live=True)
     return {"ok": 1, "id": sub_id}
 
+def _dns_query_a_marked(hostname, dns_ip="223.5.5.5", mark=0x2D0, timeout=3.5):
+    """通过带 fwmark (0x2d0 绕过 VPN TUN/DNAT/断网保护) 的原始 UDP 套接字直连公共 DNS 解析 IPv4"""
+    q_id = os.urandom(2)
+    labels = [lb.encode("idna") for lb in hostname.strip(".").split(".") if lb]
+    qname = b"".join(bytes([len(lb)]) + lb for lb in labels) + b"\x00"
+    pkt = q_id + b"\x01\x00\x00\x01\x00\x00\x00\x00\x00\x00" + qname + b"\x00\x01\x00\x01"
+
+    sock = socket.socket(socket.AF_INET, socket.SOCK_DGRAM)
+    sock.settimeout(timeout)
+    try:
+        try:
+            sock.setsockopt(socket.SOL_SOCKET, 36, int(mark))  # SO_MARK = 36 on Linux
+        except OSError:
+            pass
+        sock.sendto(pkt, (dns_ip, 53))
+        resp, _ = sock.recvfrom(1500)
+        if len(resp) < 12 or resp[:2] != q_id:
+            return ""
+        ancount = struct.unpack("!H", resp[6:8])[0]
+        if ancount == 0:
+            return ""
+        # Skip header (12) + question section
+        idx = 12
+        while idx < len(resp) and resp[idx] != 0:
+            if (resp[idx] & 0xC0) == 0xC0:
+                idx += 2
+                break
+            idx += 1 + resp[idx]
+        else:
+            idx += 1
+        idx += 4  # QTYPE + QCLASS
+        for _ in range(ancount):
+            if idx >= len(resp):
+                break
+            if (resp[idx] & 0xC0) == 0xC0:
+                idx += 2
+            else:
+                while idx < len(resp) and resp[idx] != 0:
+                    idx += 1 + resp[idx]
+                idx += 1
+            if idx + 10 > len(resp):
+                break
+            rtype, rclass, _, rdlen = struct.unpack("!HHIH", resp[idx:idx + 10])
+            idx += 10
+            if rtype == 1 and rclass == 1 and rdlen == 4 and idx + 4 <= len(resp):
+                return socket.inet_ntoa(resp[idx:idx + 4])
+            idx += rdlen
+    except Exception:
+        return ""
+    finally:
+        sock.close()
+    return ""
+
+
+def _fetch_url_direct_uplink(url, user_agent="ClashMeta/1.18.0 (U30Air)", timeout=15):
+    """当代理节点因改 SNI 全部失效导致系统 DNS 1.1.1.1 超时时，强制打标 SO_MARK=0x2d0 走蜂窝物理网卡直连拉取订阅"""
+    parsed = urllib.parse.urlsplit(url)
+    scheme = (parsed.scheme or "https").lower()
+    host = parsed.hostname or ""
+    if not host:
+        raise ValueError("URL missing host")
+    port = parsed.port or (443 if scheme == "https" else 80)
+    req_path = (parsed.path or "/") + (("?" + parsed.query) if parsed.query else "")
+
+    target_ip = host if re.fullmatch(r"\d+\.\d+\.\d+\.\d+", host) else ""
+    if not target_ip:
+        for dns_srv in ("223.5.5.5", "119.29.29.29", "1.1.1.1"):
+            target_ip = _dns_query_a_marked(host, dns_ip=dns_srv, mark=0x2D0, timeout=3.5)
+            if target_ip:
+                break
+    if not target_ip:
+        target_ip = socket.gethostbyname(host)
+
+    for _hop in range(4):
+        raw_sock = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+        raw_sock.settimeout(timeout)
+        try:
+            try:
+                raw_sock.setsockopt(socket.SOL_SOCKET, 36, 0x2D0)
+            except OSError:
+                pass
+            raw_sock.connect((target_ip, port))
+            if scheme == "https":
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                conn_sock = ctx.wrap_socket(raw_sock, server_hostname=host)
+            else:
+                conn_sock = raw_sock
+
+            host_hdr = host if port in (80, 443) else f"{host}:{port}"
+            http_req = (
+                f"GET {req_path} HTTP/1.1\r\n"
+                f"Host: {host_hdr}\r\n"
+                f"User-Agent: {user_agent}\r\n"
+                f"Accept: */*\r\n"
+                f"Connection: close\r\n\r\n"
+            ).encode("utf-8")
+            conn_sock.sendall(http_req)
+            chunks = []
+            total = 0
+            while total < 1048576:
+                buf = conn_sock.recv(16384)
+                if not buf:
+                    break
+                chunks.append(buf)
+                total += len(buf)
+            conn_sock.close()
+        except Exception:
+            try:
+                raw_sock.close()
+            except Exception:
+                pass
+            raise
+
+        raw_resp = b"".join(chunks)
+        hdr_end = raw_resp.find(b"\r\n\r\n")
+        if hdr_end < 0:
+            raise RuntimeError("Invalid HTTP response from subscription server")
+        hdr_bytes, body_bytes = raw_resp[:hdr_end], raw_resp[hdr_end + 4:]
+        hdr_lines = hdr_bytes.decode("iso-8859-1", errors="ignore").splitlines()
+        status_code = int(hdr_lines[0].split()[1]) if (hdr_lines and len(hdr_lines[0].split()) >= 2) else 0
+        hdr_map = {}
+        for hl in hdr_lines[1:]:
+            if ":" in hl:
+                hk, hv = hl.split(":", 1)
+                hdr_map[hk.strip().lower()] = hv.strip()
+
+        if status_code in (301, 302, 303, 307, 308) and hdr_map.get("location"):
+            next_url = urllib.parse.urljoin(f"{scheme}://{host}:{port}{req_path}", hdr_map["location"])
+            return _fetch_url_direct_uplink(next_url, user_agent=user_agent, timeout=timeout)
+        if status_code != 200:
+            raise RuntimeError(f"HTTP {status_code}")
+
+        if hdr_map.get("transfer-encoding", "").lower() == "chunked":
+            unchunked = bytearray()
+            pos = 0
+            while pos < len(body_bytes):
+                rn = body_bytes.find(b"\r\n", pos)
+                if rn < 0:
+                    break
+                csz = int(body_bytes[pos:rn].split(b";")[0].strip(), 16)
+                if csz == 0:
+                    break
+                unchunked.extend(body_bytes[rn + 2:rn + 2 + csz])
+                pos = rn + 2 + csz + 2
+            body_bytes = bytes(unchunked)
+
+        return body_bytes.decode("utf-8", errors="ignore")
+    raise RuntimeError("Too many redirects")
+
+
 def refresh_vpn_subscription(sub_id="all"):
     """拉取一个或多个订阅最新节点，并自动合成自适应策略组配置"""
     subs_dir = "/etc/mu300/vpn/subscriptions"
@@ -2459,12 +2611,16 @@ def refresh_vpn_subscription(sub_id="all"):
             if not url:
                 continue
 
-            ctx = ssl.create_default_context()
-            ctx.check_hostname = False
-            ctx.verify_mode = ssl.CERT_NONE
-            req = urllib.request.Request(url, headers={"User-Agent": "ClashMeta/1.18.0 (U30Air)"})
-            with urllib.request.urlopen(req, context=ctx, timeout=15) as resp:
-                content = resp.read().decode("utf-8", errors="ignore")
+            content = ""
+            try:
+                ctx = ssl.create_default_context()
+                ctx.check_hostname = False
+                ctx.verify_mode = ssl.CERT_NONE
+                req = urllib.request.Request(url, headers={"User-Agent": "ClashMeta/1.18.0 (U30Air)"})
+                with urllib.request.urlopen(req, context=ctx, timeout=10) as resp:
+                    content = resp.read().decode("utf-8", errors="ignore")
+            except Exception:
+                content = _fetch_url_direct_uplink(url, timeout=15)
 
             lines = content.splitlines(keepends=False)
             top_keys = ('proxies:', 'proxy-groups:', 'rules:', 'dns:', 'tun:')
@@ -3246,13 +3402,17 @@ def mask_imsi(imsi):
 def guess_carrier_from_ids(iccid="", imsi="", oper_code=""):
     imsi_s = re.sub(r"[^0-9]", "", str(imsi or ""))
     iccid_s = re.sub(r"[^0-9A-Fa-f]", "", str(iccid or "")).upper()
+    if iccid_s in ("89111111111111111111",) or (len(iccid_s) >= 16 and iccid_s.startswith("89") and len(set(iccid_s[2:])) == 1):
+        return "空白 eUICC 种子卡"
+    if imsi_s and len(imsi_s) >= 10 and len(set(imsi_s)) == 1:
+        return "空白 eUICC 种子卡"
     plmn = str(oper_code or "")[:5] or imsi_s[:5]
     plmn_map = {
         "46000": "中国移动", "46002": "中国移动", "46004": "中国移动", "46007": "中国移动", "46008": "中国移动", "46013": "中国移动",
         "46001": "中国联通", "46006": "中国联通", "46009": "中国联通",
         "46003": "中国电信", "46005": "中国电信", "46011": "中国电信",
         "46015": "中国广电",
-        "45400": "CSL HK", "45403": "3HK", "45406": "SmarTone", "45412": "中国移动香港", "45416": "PCCW-HKT",
+        "45400": "CSL HK", "45403": "3HK", "45406": "SmarTone", "45412": "中国移动香港", "45416": "PCCW-HKT", "45419": "ClubSim / HKT",
         "45501": "CTM 澳门电讯", "46692": "中华电信",
         "31026": "T-Mobile US", "31024": "T-Mobile US", "31041": "AT&T US", "31015": "AT&T US", "31148": "Verizon US",
         "23410": "O2 / giffgaff UK", "23415": "Vodafone UK", "23430": "EE UK",
@@ -3268,12 +3428,29 @@ def guess_carrier_from_ids(iccid="", imsi="", oper_code=""):
         return "中国电信"
     if iccid_s.startswith("898615"):
         return "中国广电"
-    if iccid_s.startswith("89852"):
-        return "中国香港运营商"
-    if iccid_s.startswith("8901"):
-        return "美国运营商 (US)"
-    if iccid_s.startswith("8944"):
-        return "英国运营商 (UK)"
+    intl_prefixes = (
+        ("89852", "中国香港运营商"),
+        ("89853", "中国澳门运营商"),
+        ("89886", "中国台湾运营商"),
+        ("8901", "美国运营商 (US)"),
+        ("8944", "英国运营商 (UK)"),
+        ("8981", "日本运营商 (JP)"),
+        ("8982", "韩国运营商 (KR)"),
+        ("8965", "新加坡运营商 (SG)"),
+        ("8966", "泰国运营商 (TH)"),
+        ("8960", "马来西亚运营商 (MY)"),
+        ("8961", "澳大利亚运营商 (AU)"),
+        ("8949", "德国运营商 (DE)"),
+        ("8933", "法国运营商 (FR)"),
+        ("8931", "荷兰运营商 (NL)"),
+        ("8943", "奥地利运营商 (AT)"),
+        ("8948", "波兰运营商 (PL)"),
+        ("89353", "爱尔兰运营商 (IE)"),
+        ("89302", "加拿大运营商 (CA)"),
+    )
+    for pfx, label in intl_prefixes:
+        if iccid_s.startswith(pfx):
+            return label
     return ""
 
 def extract_sms_otp(text):
@@ -3586,15 +3763,18 @@ def probe_sim_slot(slot_num, power_sim=False, check_euicc=True):
         })
 
     carrier = guess_carrier_from_ids(iccid, imsi)
+    if not carrier and is_euicc:
+        carrier = "eUICC 可编程白卡"
     cache_obj = load_sim_slot_cache()
     prev_slot_cache = cache_obj.get(str(idx), {}) if isinstance(cache_obj.get(str(idx)), dict) else {}
+    same_card = bool(not iccid or iccid == prev_slot_cache.get("iccid", ""))
     slot_record = {
         "cpin": cpin_state,
         "cfun": cfun_val,
         "iccid": iccid or (prev_slot_cache.get("iccid", "") if cpin_state == "UNKNOWN" else ""),
-        "imsi_masked": mask_imsi(imsi) if imsi else prev_slot_cache.get("imsi_masked", ""),
-        "imsi_plmn": imsi[:5] if len(imsi) >= 5 else prev_slot_cache.get("imsi_plmn", ""),
-        "carrier": carrier or prev_slot_cache.get("carrier", ""),
+        "imsi_masked": mask_imsi(imsi) if imsi else (prev_slot_cache.get("imsi_masked", "") if same_card else ""),
+        "imsi_plmn": imsi[:5] if len(imsi) >= 5 else (prev_slot_cache.get("imsi_plmn", "") if same_card else ""),
+        "carrier": carrier or (prev_slot_cache.get("carrier", "") if same_card else ""),
         "is_euicc": bool(is_euicc),
         "aids": aids,
         "probed_at": int(time.time()),
@@ -5604,6 +5784,11 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 self.send_json(sim_comm_resp)
                 return
 
+            euicc_resp = handle_euicc_api(method, req_data)
+            if euicc_resp is not None:
+                self.send_json(euicc_resp)
+                return
+
             nfc_resp = handle_nfc_api(method, req_data)
             if nfc_resp is not None:
                 self.send_json(nfc_resp)
@@ -5630,6 +5815,332 @@ class WebUIHandler(BaseHTTPRequestHandler):
 
     def log_message(self, format, *args):
         pass
+
+# =========================================================================
+# Phase 2: 实体 eUICC (9eSIM / ESTK / 5ber / 英飞凌小白卡) 写卡与多号管理中心
+# =========================================================================
+EUICC_TOOL_CANDIDATES = (
+    "/opt/mu300/bin/mu300-euicc",
+    os.path.join(os.path.dirname(BASE_DIR), "standalone", "device-runtime", "opt-mu300", "bin", "mu300-euicc"),
+    os.path.join(BASE_DIR, "..", "standalone", "device-runtime", "opt-mu300", "bin", "mu300-euicc"),
+)
+_EUICC_MOD_CACHE = None
+EUICC_STATE_LOCK = threading.Lock()
+EUICC_OVERVIEW_CACHE = {1: {"time": 0.0, "data": None}, 2: {"time": 0.0, "data": None}}
+EUICC_DOWNLOAD_STATE = {
+    "running": False,
+    "slot": 2,
+    "smdp": "",
+    "phase": "idle",
+    "msg": "",
+    "apdu_count": 0,
+    "started_at": 0.0,
+    "finished_at": 0.0,
+    "ok": None,
+    "error": "",
+    "new_iccid": "",
+    "new_iccid_masked": "",
+    "logs": [],
+}
+
+
+def _get_euicc_module():
+    global _EUICC_MOD_CACHE
+    if _EUICC_MOD_CACHE is not None:
+        return _EUICC_MOD_CACHE
+    import importlib.machinery
+    import importlib.util
+
+    for p in EUICC_TOOL_CANDIDATES:
+        rp = os.path.abspath(p)
+        if os.path.isfile(rp):
+            try:
+                loader = importlib.machinery.SourceFileLoader("mu300_euicc_mod", rp)
+                spec = importlib.util.spec_from_loader("mu300_euicc_mod", loader)
+                mod = importlib.util.module_from_spec(spec)
+                loader.exec_module(mod)
+                _EUICC_MOD_CACHE = mod
+                return mod
+            except Exception as e:
+                print(f"[eUICC Loader] 加载 {rp} 失败: {e}")
+    return None
+
+
+def _invalidate_euicc_cache(slot=None):
+    if slot in (1, 2):
+        EUICC_OVERVIEW_CACHE[int(slot)]["time"] = 0.0
+    else:
+        EUICC_OVERVIEW_CACHE[1]["time"] = 0.0
+        EUICC_OVERVIEW_CACHE[2]["time"] = 0.0
+
+
+def get_euicc_download_status():
+    now = time.time()
+    with EUICC_STATE_LOCK:
+        st = dict(EUICC_DOWNLOAD_STATE)
+        st["logs"] = list(EUICC_DOWNLOAD_STATE.get("logs") or [])
+    if st.get("running") and st.get("started_at"):
+        st["elapsed_s"] = round(max(0.0, now - st["started_at"]), 1)
+    else:
+        st["elapsed_s"] = round(max(0.0, (st.get("finished_at") or 0.0) - (st.get("started_at") or 0.0)), 1)
+    return {"ok": 1, "download": st}
+
+
+def get_euicc_overview_cached(slot=2, force=False):
+    s_num = 2 if int(slot or 2) == 2 else 1
+    now = time.time()
+    if not force:
+        cached = EUICC_OVERVIEW_CACHE[s_num]
+        if cached["data"] and (now - cached["time"] < 20.0):
+            out = dict(cached["data"])
+            out["download"] = get_euicc_download_status()["download"]
+            return out
+
+    mod = _get_euicc_module()
+    if mod is None:
+        return {"ok": 0, "slot": s_num, "error": "mu300-euicc 管理组件尚未安装"}
+
+    lk = AT_SLOT_LOCKS[s_num - 1]
+    if not lk.acquire(timeout=15.0):
+        return {"ok": 0, "slot": s_num, "error": f"SIM {s_num} AT 通道忙，请稍后重试"}
+    try:
+        res = mod.get_full_euicc_overview(slot=s_num)
+    finally:
+        lk.release()
+
+    if isinstance(res, dict) and res.get("ok"):
+        EUICC_OVERVIEW_CACHE[s_num] = {"time": time.time(), "data": dict(res)}
+        # 同步标记 sim-slots-cache 中的 is_euicc 字段，使移动网络页自动展示 eSIM 徽标
+        slot_cache = load_sim_slot_cache()
+        c_rec = dict(slot_cache.get(str(s_num - 1)) or {})
+        if not c_rec.get("is_euicc"):
+            c_rec["is_euicc"] = True
+            slot_cache[str(s_num - 1)] = c_rec
+            save_sim_slot_cache(slot_cache)
+    if isinstance(res, dict):
+        res["download"] = get_euicc_download_status()["download"]
+    return res
+
+
+def start_euicc_download_job(req_data):
+    mod = _get_euicc_module()
+    if mod is None:
+        return {"ok": 0, "error": "mu300-euicc 管理组件尚未安装"}
+
+    s_num = 2 if int(req_data.get("slot", 2) or 2) == 2 else 1
+    ac_str = str(req_data.get("activation_code", "") or "").strip()
+    smdp_str = str(req_data.get("smdp", "") or "").strip()
+    mid_str = str(req_data.get("matching_id", "") or "").strip()
+    cc_str = str(req_data.get("confirmation_code", "") or "").strip()
+    nickname_str = str(req_data.get("nickname", "") or "").strip()[:48]
+    auto_enable = bool(req_data.get("auto_enable", True))
+    auto_notify = bool(req_data.get("auto_notify", True))
+    imei_str = re.sub(r"[^0-9]", "", str(req_data.get("imei", "") or ""))
+    attach_imei = bool(req_data.get("attach_imei", False))
+
+    parsed = mod.parse_lpa_activation_code(ac_str, smdp_str, mid_str, cc_str)
+    if not parsed.get("ok"):
+        return parsed
+
+    if attach_imei and not imei_str:
+        ok_imei, out_imei = _slot_at(s_num - 1, "AT+CGSN", timeout=4)
+        if ok_imei:
+            m_im = re.search(r"([0-9]{15})", out_imei)
+            if m_im:
+                imei_str = m_im.group(1)
+
+    with EUICC_STATE_LOCK:
+        if EUICC_DOWNLOAD_STATE["running"]:
+            return {"ok": 0, "error": "当前已有正在执行的 eSIM 下载写卡任务，请等待其完成"}
+        EUICC_DOWNLOAD_STATE.update({
+            "running": True,
+            "slot": s_num,
+            "smdp": parsed["smdp"],
+            "phase": "starting",
+            "msg": f"正在连接 {parsed['smdp']} 发起写卡会话...",
+            "apdu_count": 0,
+            "started_at": time.time(),
+            "finished_at": 0.0,
+            "ok": None,
+            "error": "",
+            "new_iccid": "",
+            "new_iccid_masked": "",
+            "logs": [f"[{time.strftime('%H:%M:%S')}] 启动写卡任务 -> {parsed['smdp']} (SIM {s_num})"],
+        })
+
+    def _on_progress(step_key, human_msg, apdu_cnt):
+        with EUICC_STATE_LOCK:
+            EUICC_DOWNLOAD_STATE["phase"] = str(step_key or "working")
+            EUICC_DOWNLOAD_STATE["msg"] = str(human_msg or "正在写入...")
+            EUICC_DOWNLOAD_STATE["apdu_count"] = int(apdu_cnt or 0)
+            logs = EUICC_DOWNLOAD_STATE["logs"]
+            entry = f"[{time.strftime('%H:%M:%S')}] {human_msg}"
+            if not logs or logs[-1] != entry:
+                logs.append(entry)
+                if len(logs) > 25:
+                    del logs[:-25]
+
+    def _dl_worker():
+        lk = AT_SLOT_LOCKS[s_num - 1]
+        res = {"ok": 0, "error": "未知异常"}
+        try:
+            if not lk.acquire(timeout=25.0):
+                raise RuntimeError(f"SIM {s_num} AT 串口正忙，请稍后重试")
+            try:
+                res = mod.download_profile(
+                    slot=s_num,
+                    activation_code=ac_str,
+                    smdp=smdp_str,
+                    matching_id=mid_str,
+                    confirmation_code=cc_str,
+                    imei=imei_str,
+                    nickname=nickname_str,
+                    auto_enable=auto_enable,
+                    auto_notify=auto_notify,
+                    progress_cb=_on_progress,
+                )
+            finally:
+                lk.release()
+
+            _invalidate_euicc_cache(s_num)
+            if res.get("ok") and res.get("enabled"):
+                probe_sim_slot(s_num, power_sim=False, check_euicc=False)
+                _invalidate_cellular_caches()
+        except Exception as e:
+            res = {"ok": 0, "error": str(e)}
+        finally:
+            with EUICC_STATE_LOCK:
+                ok_flag = 1 if res.get("ok") else 0
+                final_msg = res.get("msg") if ok_flag else (res.get("error") or "写卡失败")
+                EUICC_DOWNLOAD_STATE.update({
+                    "running": False,
+                    "phase": "done" if ok_flag else "failed",
+                    "msg": final_msg,
+                    "apdu_count": int(res.get("apdu_count", EUICC_DOWNLOAD_STATE.get("apdu_count", 0)) or 0),
+                    "finished_at": time.time(),
+                    "ok": ok_flag,
+                    "error": "" if ok_flag else str(res.get("error") or "写卡失败"),
+                    "new_iccid": str(res.get("new_iccid") or ""),
+                    "new_iccid_masked": str(res.get("new_iccid_masked") or ""),
+                })
+                EUICC_DOWNLOAD_STATE["logs"].append(f"[{time.strftime('%H:%M:%S')}] {'✅ ' if ok_flag else '❌ '}{final_msg}")
+            record_comm_event(
+                "euicc",
+                f"SIM {s_num} eSIM 写卡{'成功' if res.get('ok') else '失败'}",
+                res.get("msg") or res.get("error") or parsed["smdp"],
+                ok=bool(res.get("ok")),
+            )
+
+    threading.Thread(target=_dl_worker, daemon=True).start()
+    return {
+        "ok": 1,
+        "started": True,
+        "slot": s_num,
+        "smdp": parsed["smdp"],
+        "download": get_euicc_download_status()["download"],
+    }
+
+
+def handle_euicc_api(method, req_data):
+    """统一路由 Phase 2 实体 eUICC (eSIM) 扫码写卡、切号、备注与通知回执管理接口"""
+    if not str(method or "").startswith("euicc."):
+        return None
+    req_data = req_data if isinstance(req_data, dict) else {}
+    s_num = 2 if int(req_data.get("slot", 2) or 2) == 2 else 1
+
+    if method == "euicc.overview":
+        return get_euicc_overview_cached(slot=s_num, force=bool(req_data.get("force", False)))
+
+    if method == "euicc.download_status":
+        return get_euicc_download_status()
+
+    mod = _get_euicc_module()
+    if mod is None:
+        return {"ok": 0, "error": "mu300-euicc 管理组件尚未安装"}
+
+    if method == "euicc.parse_lpa":
+        return mod.parse_lpa_activation_code(
+            req_data.get("activation_code", ""),
+            req_data.get("smdp", ""),
+            req_data.get("matching_id", ""),
+            req_data.get("confirmation_code", ""),
+        )
+
+    if method == "euicc.download":
+        return start_euicc_download_job(req_data)
+
+    if EUICC_DOWNLOAD_STATE.get("running"):
+        return {"ok": 0, "error": "当前正在下载写入新 eSIM，请等待写卡完成后再执行其他操作"}
+
+    lk = AT_SLOT_LOCKS[s_num - 1]
+    if not lk.acquire(timeout=20.0):
+        return {"ok": 0, "error": f"SIM {s_num} AT 串口正忙，请稍后重试"}
+    try:
+        if method in ("euicc.enable", "euicc.disable"):
+            act = "enable" if method == "euicc.enable" else "disable"
+            res = mod.switch_profile_state(
+                s_num,
+                req_data.get("iccid", ""),
+                action=act,
+                isdp_aid=req_data.get("isdp_aid", ""),
+                auto_notify=bool(req_data.get("auto_notify", True)),
+            )
+            _invalidate_euicc_cache(s_num)
+            if res.get("ok"):
+                probe_sim_slot(s_num, power_sim=False, check_euicc=False)
+                _invalidate_cellular_caches()
+                res["overview"] = mod.get_full_euicc_overview(slot=s_num)
+                if res["overview"].get("ok"):
+                    EUICC_OVERVIEW_CACHE[s_num] = {"time": time.time(), "data": dict(res["overview"])}
+            return res
+
+        if method == "euicc.delete":
+            res = mod.delete_profile(
+                s_num,
+                req_data.get("iccid", ""),
+                isdp_aid=req_data.get("isdp_aid", ""),
+                auto_notify=bool(req_data.get("auto_notify", True)),
+            )
+            _invalidate_euicc_cache(s_num)
+            if res.get("ok"):
+                probe_sim_slot(s_num, power_sim=False, check_euicc=False)
+                res["overview"] = mod.get_full_euicc_overview(slot=s_num)
+                if res["overview"].get("ok"):
+                    EUICC_OVERVIEW_CACHE[s_num] = {"time": time.time(), "data": dict(res["overview"])}
+            return res
+
+        if method == "euicc.nickname":
+            res = mod.set_profile_nickname(s_num, req_data.get("iccid", ""), req_data.get("nickname", ""))
+            _invalidate_euicc_cache(s_num)
+            if res.get("ok"):
+                res["overview"] = mod.get_full_euicc_overview(slot=s_num)
+                if res["overview"].get("ok"):
+                    EUICC_OVERVIEW_CACHE[s_num] = {"time": time.time(), "data": dict(res["overview"])}
+            return res
+
+        if method == "euicc.notif_process":
+            res = mod.process_notifications(
+                slot=s_num,
+                seq=req_data.get("seq", "all"),
+                remove_after=bool(req_data.get("remove_after", True)),
+            )
+            _invalidate_euicc_cache(s_num)
+            return res
+
+        if method == "euicc.notif_remove":
+            res = mod.remove_notifications(slot=s_num, seq=req_data.get("seq", "all"))
+            _invalidate_euicc_cache(s_num)
+            return res
+
+        if method == "euicc.set_smdp":
+            res = mod.set_default_smdp_addr(slot=s_num, smdp=req_data.get("smdp", ""))
+            _invalidate_euicc_cache(s_num)
+            return res
+    finally:
+        lk.release()
+
+    return {"ok": 0, "error": f"未知的 eUICC 接口: {method}"}
+
 
 # =========================================================================
 # NFC 标签 (FM11NT08 / I2C-2 0x57) 状态读取、射频开关与 Wi-Fi 自动同步

@@ -281,6 +281,7 @@ function switchTab(tabId) {
 
   if (tabId === 'overview') requestAnimationFrame(renderTrafficChart);
   if (tabId === 'network') loadNetworkTab();
+  if (tabId === 'esim') loadEsimOverview(false);
   if (tabId === 'sms') loadSmsTab();
   if (tabId === 'at') loadAtHistory();
   if (tabId === 'traffic') loadTrafficStats();
@@ -1919,6 +1920,11 @@ function renderSimSlotCards(ov) {
           <button onclick="probeSimSlot(${s.slot})" id="btn-probe-slot-${s.slot}" class="px-3 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 font-semibold transition">
             🔍 检测卡槽触点 (不断网)
           </button>
+          ${s.is_euicc ? `
+            <button onclick="jumpToEsimTab(${s.slot})" class="px-3 py-1.5 rounded-xl bg-purple-500/20 hover:bg-purple-500/30 text-purple-200 border border-purple-500/40 font-bold transition">
+              ✨ eSIM 写卡/切号
+            </button>
+          ` : ''}
           ${!isAct ? `
             <button onclick="switchActiveSim(${s.slot})" class="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition">
               ⚡ 切换至此卡上网
@@ -3590,6 +3596,605 @@ async function checkUpdate() {
       btn.innerText = '检查新版更新';
     }
     showToast('检查更新异常: ' + e.message, false);
+  }
+}
+
+// =========================================================================
+// Phase 2: 实体 eUICC (9eSIM / ESTK / 5ber / 英飞凌小白卡) 扫码写卡与多号管理
+// =========================================================================
+let esimOverviewCache = null;
+let esimDlPollTimer = null;
+let jsqrLoadPromise = null;
+
+function getSelectedEsimSlot() {
+  const sel = document.getElementById('esim-slot-select');
+  return sel ? Number(sel.value || 2) : 2;
+}
+
+function jumpToEsimTab(slotNum = 2) {
+  const sel = document.getElementById('esim-slot-select');
+  if (sel) sel.value = String(slotNum || 2);
+  switchTab('esim');
+}
+
+function onEsimSlotChange() {
+  loadEsimOverview(true);
+}
+
+function copyEsimEid() {
+  const eid = esimOverviewCache && esimOverviewCache.chip && esimOverviewCache.chip.eid;
+  if (!eid) return showToast('尚未读取到芯片 EID，请先点击刷新', false);
+  copyToClipboard(eid, '32位卡片 EID');
+}
+
+function ensureJsQrLoaded() {
+  if (typeof window.jsQR === 'function') return Promise.resolve(window.jsQR);
+  if (jsqrLoadPromise) return jsqrLoadPromise;
+  jsqrLoadPromise = new Promise((resolve, reject) => {
+    const sc = document.createElement('script');
+    sc.src = '/jsqr.min.js?v=140';
+    sc.async = true;
+    sc.onload = () => {
+      if (typeof window.jsQR === 'function') resolve(window.jsQR);
+      else reject(new Error('jsQR 初始化失败'));
+    };
+    sc.onerror = () => {
+      jsqrLoadPromise = null;
+      reject(new Error('加载本地 jsqr.min.js 失败'));
+    };
+    document.head.appendChild(sc);
+  });
+  return jsqrLoadPromise;
+}
+
+async function decodeQrFromFile(file) {
+  if (!file || !file.type.startsWith('image/')) {
+    return showToast('请选择或粘贴有效的二维码图片文件', false);
+  }
+  const stEl = document.getElementById('esim-qr-status');
+  if (stEl) {
+    stEl.innerText = '⏳ 正在浏览器本地识别二维码...';
+    stEl.className = 'text-[11px] text-cyan-300 font-mono';
+  }
+
+  try {
+    let decodedText = '';
+
+    // 1. 优先尝试浏览器原生硬件加速 BarcodeDetector (若支持)
+    if ('BarcodeDetector' in window && typeof createImageBitmap === 'function') {
+      try {
+        const detector = new BarcodeDetector({ formats: ['qr_code'] });
+        const bmp = await createImageBitmap(file);
+        const hits = await detector.detect(bmp);
+        if (bmp.close) bmp.close();
+        if (hits && hits.length && hits[0].rawValue) {
+          decodedText = String(hits[0].rawValue).trim();
+        }
+      } catch (e) {}
+    }
+
+    // 2. 离线本地兜底：懒加载 /jsqr.min.js 多尺度像素扫描 (兼容 Safari / Firefox / HTTP 环境与深色反色码)
+    if (!decodedText) {
+      const jsQR = await ensureJsQrLoaded();
+      const imgUrl = URL.createObjectURL(file);
+      try {
+        const img = await new Promise((res, rej) => {
+          const im = new Image();
+          im.onload = () => res(im);
+          im.onerror = () => rej(new Error('图片解码失败'));
+          im.src = imgUrl;
+        });
+        const scales = [1.0, 0.65, 0.4, 1.5];
+        const canvas = document.createElement('canvas');
+        const ctx = canvas.getContext('2d', { willReadFrequently: true });
+        for (const scale of scales) {
+          const w = Math.max(80, Math.min(1800, Math.round(img.naturalWidth * scale)));
+          const h = Math.max(80, Math.min(1800, Math.round(img.naturalHeight * scale)));
+          canvas.width = w;
+          canvas.height = h;
+          ctx.drawImage(img, 0, 0, w, h);
+          const imgData = ctx.getImageData(0, 0, w, h);
+          const hit = jsQR(imgData.data, w, h, { inversionAttempts: 'attemptBoth' });
+          if (hit && hit.data) {
+            decodedText = String(hit.data).trim();
+            break;
+          }
+        }
+      } finally {
+        URL.revokeObjectURL(imgUrl);
+      }
+    }
+
+    if (!decodedText) {
+      if (stEl) {
+        stEl.innerText = '⚠️ 未能从图片中识别出二维码，请裁剪放大二维码区域重试，或直接粘贴下方激活码文字';
+        stEl.className = 'text-[11px] text-amber-300';
+      }
+      return showToast('未在图片中识别到有效二维码，请裁剪二维码区域重试', false);
+    }
+
+    const lpaEl = document.getElementById('esim-lpa-input');
+    if (lpaEl) lpaEl.value = decodedText;
+    onEsimLpaInput(true);
+    if (stEl) {
+      stEl.innerText = `✅ 二维码识别成功！已自动解析填入 SM-DP+ 服务器与激活码`;
+      stEl.className = 'text-[11px] text-emerald-400 font-semibold';
+    }
+    showToast('二维码识别成功，核对备注后点击底部写入即可！');
+  } catch (err) {
+    if (stEl) {
+      stEl.innerText = '❌ 二维码识别异常: ' + (err.message || err);
+      stEl.className = 'text-[11px] text-rose-400';
+    }
+    showToast('二维码识别失败: ' + (err.message || err), false);
+  }
+}
+
+function onEsimQrFileSelect(ev) {
+  const f = ev.target && ev.target.files && ev.target.files[0];
+  if (f) decodeQrFromFile(f);
+  if (ev.target) ev.target.value = '';
+}
+
+function onEsimQrDragOver(ev) {
+  ev.preventDefault();
+  ev.currentTarget.classList.add('border-cyan-400', 'bg-cyan-950/30');
+}
+
+function onEsimQrDragLeave(ev) {
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('border-cyan-400', 'bg-cyan-950/30');
+}
+
+function onEsimQrDrop(ev) {
+  ev.preventDefault();
+  ev.currentTarget.classList.remove('border-cyan-400', 'bg-cyan-950/30');
+  const f = ev.dataTransfer && ev.dataTransfer.files && ev.dataTransfer.files[0];
+  if (f) decodeQrFromFile(f);
+}
+
+// 支持在「eSIM 写卡」面板直接 Ctrl+V 粘贴剪贴板二维码截图
+document.addEventListener('paste', ev => {
+  const panel = document.getElementById('panel-esim');
+  if (!panel || panel.classList.contains('hidden')) return;
+  const items = ev.clipboardData && ev.clipboardData.items;
+  if (!items) return;
+  for (let i = 0; i < items.length; i++) {
+    if (items[i].type && items[i].type.startsWith('image/')) {
+      const blob = items[i].getAsFile();
+      if (blob) {
+        ev.preventDefault();
+        decodeQrFromFile(blob);
+        return;
+      }
+    }
+  }
+});
+
+function onEsimLpaInput(fromQr = false) {
+  const raw = (document.getElementById('esim-lpa-input')?.value || '').trim();
+  if (!raw) return;
+  const body = raw.toUpperCase().startsWith('LPA:') ? raw.slice(4) : raw;
+  if (body.startsWith('1$')) {
+    const parts = body.split('$');
+    const smdp = (parts[1] || '').trim();
+    const mid = (parts[2] || '').trim();
+    const reqCc = (parts[4] || '').trim() === '1';
+    if (document.getElementById('esim-smdp-input')) document.getElementById('esim-smdp-input').value = smdp;
+    if (document.getElementById('esim-mid-input')) document.getElementById('esim-mid-input').value = mid;
+    if (reqCc && fromQr) {
+      showToast('提示：该二维码标记需要输入确认码 (Confirmation Code)，请留意邮件说明', false);
+      document.getElementById('esim-cc-input')?.focus();
+    }
+  }
+}
+
+function syncLpaFromParts() {
+  const smdp = (document.getElementById('esim-smdp-input')?.value || '').trim().replace(/^https?:\/\//i, '').replace(/\/+$/, '');
+  const mid = (document.getElementById('esim-mid-input')?.value || '').trim();
+  const lpaEl = document.getElementById('esim-lpa-input');
+  if (lpaEl) {
+    lpaEl.value = smdp ? `LPA:1$${smdp}$${mid}` : '';
+  }
+}
+
+function clearEsimForm() {
+  ['esim-lpa-input', 'esim-smdp-input', 'esim-mid-input', 'esim-nick-input', 'esim-cc-input'].forEach(id => {
+    const el = document.getElementById(id);
+    if (el) el.value = '';
+  });
+  const stEl = document.getElementById('esim-qr-status');
+  if (stEl) {
+    stEl.innerText = '100% 浏览器本地离线解码，二维码图片不会上传至任何第三方';
+    stEl.className = 'text-[11px] text-slate-400';
+  }
+}
+
+async function loadEsimOverview(force = false) {
+  const slot = getSelectedEsimSlot();
+  const btn = document.getElementById('btn-esim-refresh');
+  if (btn && force) { btn.disabled = true; btn.innerText = '⏳ 读取芯片中...'; }
+  try {
+    const res = await apiCall('euicc.overview', { slot, force: !!force });
+    if (res && res.ok) {
+      esimOverviewCache = res;
+      renderEsimOverview(res);
+      if (force) showToast(`SIM ${slot} eUICC 芯片与号码列表已刷新`);
+    } else {
+      esimOverviewCache = null;
+      renderEsimErrorState(slot, (res && res.error) || '当前卡槽未检测到 eUICC 白卡芯片');
+      if (force) showToast((res && res.error) || '未检测到 eUICC 芯片', false);
+    }
+  } finally {
+    if (btn) { btn.disabled = false; btn.innerText = '🔄 刷新芯片与号码'; }
+  }
+}
+
+function renderEsimErrorState(slot, errMsg) {
+  const badge = document.getElementById('esim-chip-badge');
+  if (badge) {
+    badge.innerText = `SIM ${slot} 未检出 eUICC`;
+    badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-rose-500/15 text-rose-300 border border-rose-500/30';
+  }
+  const eidEl = document.getElementById('esim-eid-text');
+  if (eidEl) eidEl.innerText = '未检测到 ISD-R 容器';
+  const listEl = document.getElementById('esim-profiles-list');
+  if (listEl) {
+    listEl.innerHTML = `
+      <div class="p-6 rounded-2xl bg-rose-950/20 border border-rose-500/30 text-center space-y-2">
+        <div class="text-rose-300 font-bold text-sm">⚠️ SIM ${slot} 当前不可管理 eSIM</div>
+        <div class="text-slate-400 text-xs font-mono">${escapeHtml(errMsg)}</div>
+        <div class="text-[11px] text-slate-500">请确认已在上方下拉框选择插有小白卡 / 9eSIM / ESTK 的卡槽（默认为改装后的 SIM 2）。</div>
+      </div>
+    `;
+  }
+}
+
+function renderEsimOverview(res) {
+  const chip = res.chip || {};
+  const cap = chip.capacity || {};
+  const profiles = Array.isArray(res.profiles) ? res.profiles : [];
+  const notifs = Array.isArray(res.notifications) ? res.notifications : [];
+
+  const badge = document.getElementById('esim-chip-badge');
+  if (badge) {
+    badge.innerText = `✅ SIM ${res.slot} 就绪 · ${cap.tier_label || 'eUICC 白卡'}`;
+    badge.className = 'px-2.5 py-0.5 rounded-full text-[11px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+  }
+
+  const navCnt = document.getElementById('nav-esim-count');
+  if (navCnt) {
+    navCnt.innerText = String(profiles.length);
+    navCnt.classList.remove('hidden');
+  }
+
+  if (document.getElementById('esim-eid-text')) {
+    document.getElementById('esim-eid-text').innerText = chip.eid || '--';
+  }
+  if (document.getElementById('esim-cert-sub')) {
+    document.getElementById('esim-cert-sub').innerText = `GSMA 根证书: ${chip.ci_count || 1} 组 · 主网流量卡: SIM ${res.active_data_slot || 1}`;
+  }
+  if (document.getElementById('esim-free-kb')) {
+    document.getElementById('esim-free-kb').innerText = `${cap.free_kb != null ? cap.free_kb : '--'} KB 剩余`;
+  }
+  const bar = document.getElementById('esim-cap-bar');
+  if (bar) {
+    const freePct = cap.total_kb_est > 0 ? Math.max(3, Math.min(100, 100 - Number(cap.used_pct_est || 0))) : 100;
+    bar.style.width = `${freePct}%`;
+  }
+  if (document.getElementById('esim-tier-hint')) {
+    document.getElementById('esim-tier-hint').innerText = `${cap.tier_label || ''} · 约可再写 ${cap.est_profiles_remaining || 0} 个号码`;
+  }
+  if (document.getElementById('esim-prof-count')) {
+    document.getElementById('esim-prof-count').innerText = String(profiles.length);
+  }
+  const enabledProf = profiles.find(p => p.enabled);
+  if (document.getElementById('esim-active-prof-hint')) {
+    document.getElementById('esim-active-prof-hint').innerText = enabledProf
+      ? `当前启用: ${enabledProf.nickname || enabledProf.provider || enabledProf.iccid_masked}`
+      : (profiles.length ? '当前全部处于停用状态' : '全新空卡 (出厂占位态)');
+  }
+  if (document.getElementById('esim-sas-text')) {
+    document.getElementById('esim-sas-text').innerText = chip.sas_accreditation || 'Standard eUICC';
+  }
+  if (document.getElementById('esim-svn-text')) {
+    document.getElementById('esim-svn-text').innerText = `SGP.22 v${chip.svn || '2.2'} · FW v${chip.firmware_ver || '--'}`;
+  }
+
+  // 渲染下载状态条
+  if (res.download) {
+    renderEsimDownloadBanner(res.download);
+    if (res.download.running) startEsimDownloadPolling();
+  }
+
+  // 渲染号码列表
+  const listEl = document.getElementById('esim-profiles-list');
+  if (listEl) {
+    if (!profiles.length) {
+      listEl.innerHTML = `
+        <div class="p-6 rounded-2xl bg-slate-900/55 border border-slate-800/80 text-center space-y-2">
+          <div class="text-2xl">✨</div>
+          <div class="text-white font-bold text-sm">这是一张全新的空白大容量白卡 (${cap.free_kb || '--'} KB 可用)</div>
+          <div class="text-slate-400 text-xs max-w-md mx-auto leading-relaxed">
+            在左侧拖入或 <kbd class="px-1.5 py-0.5 rounded bg-slate-800 border border-slate-700 font-mono text-[10px]">Ctrl+V</kbd> 粘贴海外运营商 eSIM 二维码截图，即可免读卡器直接将第一个号码写入 SIM ${res.slot}！
+          </div>
+        </div>
+      `;
+    } else {
+      listEl.innerHTML = profiles.map(p => {
+        const isEn = !!p.enabled;
+        const reg = p.region || { flag: '🌍', name: '海外' };
+        const title = p.nickname || p.provider || p.profile_name || 'eSIM Profile';
+        const subTitle = p.nickname ? `${p.provider || ''} · ${p.profile_name || ''}` : (p.profile_name || '');
+        const borderCls = isEn
+          ? 'border-emerald-500/50 bg-gradient-to-br from-slate-900/95 to-emerald-950/20 shadow-md shadow-emerald-950/20'
+          : 'border-slate-800 bg-slate-900/70 hover:border-slate-700';
+        const stateBadge = isEn
+          ? '<span class="px-2 py-0.5 rounded-full text-[10px] font-bold bg-emerald-500 text-black">🟢 已启用</span>'
+          : '<span class="px-2 py-0.5 rounded-full text-[10px] font-medium bg-slate-800 text-slate-400 border border-slate-700">⚪ 已停用</span>';
+
+        return `
+          <div class="p-4 rounded-2xl border ${borderCls} space-y-3 transition">
+            <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <div class="space-y-1">
+                <div class="flex flex-wrap items-center gap-2">
+                  <span class="text-base">${reg.flag || '🌍'}</span>
+                  <span class="font-bold text-white text-sm">${escapeHtml(title)}</span>
+                  ${stateBadge}
+                  <span class="px-1.5 py-0.5 rounded text-[10px] font-mono bg-slate-800/90 text-cyan-300 border border-slate-700">${escapeHtml(reg.name || '')}</span>
+                </div>
+                <div class="flex flex-wrap items-center gap-x-3 gap-y-0.5 text-[11px] text-slate-400">
+                  ${subTitle ? `<span>${escapeHtml(subTitle)}</span>` : ''}
+                  <button onclick="copyToClipboard('${escapeJs(p.iccid)}', 'eSIM ICCID')" class="font-mono text-slate-300 hover:text-cyan-300 underline decoration-dotted" title="点击复制完整 ICCID">
+                    ICCID: ${escapeHtml(p.iccid_masked)} 📋
+                  </button>
+                </div>
+              </div>
+
+              <div class="flex flex-wrap items-center gap-1.5 shrink-0">
+                ${isEn ? `
+                  ${res.slot !== res.active_data_slot ? `
+                    <button onclick="openFlashSwitchModal(${res.slot})" class="px-2.5 py-1.5 rounded-xl bg-amber-500/20 hover:bg-amber-500/30 text-amber-300 border border-amber-500/40 font-bold transition" title="临时切往此卡收海外短信验证码，收到自动切回卡 1">
+                      ⏱️ 闪切收码
+                    </button>
+                  ` : ''}
+                  <button onclick="toggleEsimProfile('${escapeJs(p.iccid)}', '${escapeJs(p.isdp_aid || '')}', 'disable')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 border border-slate-700 transition">
+                    停用
+                  </button>
+                ` : `
+                  <button onclick="toggleEsimProfile('${escapeJs(p.iccid)}', '${escapeJs(p.isdp_aid || '')}', 'enable')" class="px-3 py-1.5 rounded-xl bg-emerald-500 hover:bg-emerald-400 text-black font-bold transition">
+                    🟢 启用此号
+                  </button>
+                `}
+                <button onclick="promptEsimNickname('${escapeJs(p.iccid)}', '${escapeJs(p.nickname || '')}')" class="px-2.5 py-1.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 transition">
+                  ✏️ 备注
+                </button>
+                <button onclick="confirmDeleteEsimProfile('${escapeJs(p.iccid)}', '${escapeJs(p.isdp_aid || '')}', '${escapeJs(title)}', ${isEn})" class="px-2.5 py-1.5 rounded-xl bg-rose-500/10 hover:bg-rose-500/20 text-rose-400 border border-rose-500/30 transition">
+                  🗑️ 删除
+                </button>
+              </div>
+            </div>
+          </div>
+        `;
+      }).join('');
+    }
+  }
+
+  // 渲染通知队列
+  const nBadge = document.getElementById('esim-notif-badge');
+  if (nBadge) {
+    nBadge.innerText = `${notifs.length} 条待处理`;
+    nBadge.className = notifs.length > 0
+      ? 'px-2 py-0.5 rounded-full text-[10px] font-mono bg-amber-500/20 text-amber-300 border border-amber-500/40 font-bold'
+      : 'px-2 py-0.5 rounded-full text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700';
+  }
+  const nList = document.getElementById('esim-notifs-list');
+  if (nList) {
+    if (!notifs.length) {
+      nList.innerHTML = '<div class="text-slate-500 text-center py-2">当前芯片无积压通知回执</div>';
+    } else {
+      nList.innerHTML = notifs.map(n => `
+        <div class="p-2.5 rounded-xl bg-slate-900/80 border border-slate-800 flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+          <div class="font-mono text-[11px]">
+            <span class="px-1.5 py-0.5 rounded bg-purple-500/20 text-purple-300 border border-purple-500/30 mr-1.5">#${n.seq} ${escapeHtml(n.operation)}</span>
+            <span class="text-slate-300">${escapeHtml(n.iccid_masked)}</span>
+            <span class="text-slate-500 ml-1">→ ${escapeHtml(n.address || '')}</span>
+          </div>
+          <div class="flex items-center gap-1.5 self-end sm:self-auto">
+            <button onclick="processEsimNotifications(${n.seq})" class="px-2 py-1 rounded-lg bg-cyan-600/20 hover:bg-cyan-600/30 text-cyan-300 border border-cyan-500/30 text-[11px]">上报</button>
+            <button onclick="removeEsimNotifications(${n.seq})" class="px-2 py-1 rounded-lg bg-slate-800 hover:bg-rose-950 text-slate-400 hover:text-rose-300 border border-slate-700 text-[11px]">移除</button>
+          </div>
+        </div>
+      `).join('');
+    }
+  }
+}
+
+function renderEsimDownloadBanner(dl) {
+  const banner = document.getElementById('esim-dl-banner');
+  if (!banner || !dl) return;
+  const recentDone = !dl.running && dl.finished_at && (Date.now() / 1000 - dl.finished_at < 25);
+  if (!dl.running && !recentDone) {
+    banner.classList.add('hidden');
+    return;
+  }
+  banner.classList.remove('hidden');
+  const dot = document.getElementById('esim-dl-dot');
+  const titleEl = document.getElementById('esim-dl-title');
+  const msgEl = document.getElementById('esim-dl-msg');
+  const apduEl = document.getElementById('esim-dl-apdu');
+  const elapEl = document.getElementById('esim-dl-elapsed');
+  const logsEl = document.getElementById('esim-dl-logs');
+
+  if (dl.running) {
+    banner.className = 'p-4 rounded-2xl bg-purple-950/40 border border-purple-500/40 space-y-2.5 text-xs';
+    if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-purple-400 animate-ping shrink-0';
+    if (titleEl) titleEl.innerText = `⚡ 正在向 SIM ${dl.slot || 2} 下载写入 eSIM (${dl.smdp || ''})...`;
+  } else if (dl.ok) {
+    banner.className = 'p-4 rounded-2xl bg-emerald-950/35 border border-emerald-500/40 space-y-2.5 text-xs';
+    if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shrink-0';
+    if (titleEl) titleEl.innerText = '✅ eSIM 下载写入完成！';
+  } else {
+    banner.className = 'p-4 rounded-2xl bg-rose-950/35 border border-rose-500/40 space-y-2.5 text-xs';
+    if (dot) dot.className = 'w-2.5 h-2.5 rounded-full bg-rose-400 shrink-0';
+    if (titleEl) titleEl.innerText = '❌ eSIM 下载写入未成功';
+  }
+  if (msgEl) msgEl.innerText = dl.msg || dl.error || '';
+  if (apduEl) apduEl.innerText = `${dl.apdu_count || 0} 帧 APDU`;
+  if (elapEl) elapEl.innerText = `${dl.elapsed_s || 0}s`;
+  if (logsEl && Array.isArray(dl.logs)) {
+    logsEl.innerHTML = dl.logs.map(l => `<div>${escapeHtml(l)}</div>`).join('');
+    logsEl.scrollTop = logsEl.scrollHeight;
+  }
+}
+
+function startEsimDownloadPolling() {
+  if (esimDlPollTimer) return;
+  const btn = document.getElementById('btn-esim-download');
+  if (btn) { btn.disabled = true; btn.innerText = '⏳ 正在向芯片分片写卡中，请勿拔卡...'; }
+  esimDlPollTimer = setInterval(async () => {
+    const res = await apiCall('euicc.download_status');
+    if (res && res.ok && res.download) {
+      const dl = res.download;
+      renderEsimDownloadBanner(dl);
+      if (!dl.running) {
+        clearInterval(esimDlPollTimer);
+        esimDlPollTimer = null;
+        if (btn) { btn.disabled = false; btn.innerText = '⚡ 免读卡器立即下载并写入白卡'; }
+        if (dl.ok) {
+          showToast(dl.msg || 'eSIM 写入成功！');
+          clearEsimForm();
+        } else {
+          showToast('写卡失败: ' + (dl.error || dl.msg || ''), false);
+        }
+        loadEsimOverview(true);
+        loadSimOverview(false);
+      }
+    }
+  }, 1500);
+}
+
+async function submitEsimDownload() {
+  const slot = getSelectedEsimSlot();
+  const activation_code = (document.getElementById('esim-lpa-input')?.value || '').trim();
+  const smdp = (document.getElementById('esim-smdp-input')?.value || '').trim();
+  const matching_id = (document.getElementById('esim-mid-input')?.value || '').trim();
+  const nickname = (document.getElementById('esim-nick-input')?.value || '').trim();
+  const confirmation_code = (document.getElementById('esim-cc-input')?.value || '').trim();
+  const auto_enable = !!document.getElementById('esim-auto-enable')?.checked;
+  const auto_notify = !!document.getElementById('esim-auto-notify')?.checked;
+  const attach_imei = !!document.getElementById('esim-attach-imei')?.checked;
+
+  if (!activation_code && !smdp) {
+    return showToast('请先上传/粘贴 eSIM 二维码图片，或输入 LPA 激活码 / SM-DP+ 地址', false);
+  }
+  showToast(`正在校验激活码并启动 SIM ${slot} 在线写卡任务...`);
+  const res = await apiCall('euicc.download', {
+    slot,
+    activation_code,
+    smdp,
+    matching_id,
+    confirmation_code,
+    nickname,
+    auto_enable,
+    auto_notify,
+    attach_imei
+  });
+  if (res && res.ok) {
+    if (res.download) renderEsimDownloadBanner(res.download);
+    startEsimDownloadPolling();
+  } else {
+    showToast((res && res.error) || '启动写卡失败', false);
+  }
+}
+
+async function toggleEsimProfile(iccid, isdp_aid, action) {
+  const slot = getSelectedEsimSlot();
+  const auto_notify = document.getElementById('esim-auto-notify') ? document.getElementById('esim-auto-notify').checked : true;
+  showToast(action === 'enable' ? '正在切换启用该 eSIM 号码（主卡不断流）...' : '正在停用该 eSIM 号码...');
+  const res = await apiCall(action === 'enable' ? 'euicc.enable' : 'euicc.disable', {
+    slot,
+    iccid,
+    isdp_aid,
+    auto_notify
+  });
+  if (res && res.ok) {
+    showToast(res.msg || '号码状态切换成功');
+    if (res.overview && res.overview.ok) {
+      esimOverviewCache = res.overview;
+      renderEsimOverview(res.overview);
+    } else {
+      loadEsimOverview(true);
+    }
+    loadSimOverview(false);
+  } else {
+    showToast('操作失败: ' + ((res && res.error) || ''), false);
+  }
+}
+
+async function promptEsimNickname(iccid, curNick) {
+  const slot = getSelectedEsimSlot();
+  const next = prompt('请输入该 eSIM 号码的备注名称（支持中文与国旗 Emoji，留空则清除备注）：', curNick || '');
+  if (next === null) return;
+  showToast('正在保存号码备注...');
+  const res = await apiCall('euicc.nickname', { slot, iccid, nickname: next.trim() });
+  if (res && res.ok) {
+    showToast(res.msg || '备注已保存');
+    if (res.overview && res.overview.ok) {
+      esimOverviewCache = res.overview;
+      renderEsimOverview(res.overview);
+    } else {
+      loadEsimOverview(true);
+    }
+    loadSimOverview(false);
+  } else {
+    showToast('保存备注失败: ' + ((res && res.error) || ''), false);
+  }
+}
+
+async function confirmDeleteEsimProfile(iccid, isdp_aid, title, isEnabled) {
+  const slot = getSelectedEsimSlot();
+  const warn = `⚠️ 危险操作确认：\n\n确定要从白卡芯片永久删除【${title}】(${iccid}) 吗？\n` +
+    (isEnabled ? '（该号码当前处于启用态，系统将先自动停用再删除）\n' : '') +
+    '注意：部分一次性海外二维码删除后需在运营商后台重新申请补发！';
+  if (!confirm(warn)) return;
+  showToast('正在从芯片安全删除号码并向运营商同步释放回执...');
+  const res = await apiCall('euicc.delete', { slot, iccid, isdp_aid, auto_notify: true });
+  if (res && res.ok) {
+    showToast(res.msg || '已永久删除该 eSIM 号码');
+    if (res.overview && res.overview.ok) {
+      esimOverviewCache = res.overview;
+      renderEsimOverview(res.overview);
+    } else {
+      loadEsimOverview(true);
+    }
+    loadSimOverview(false);
+  } else {
+    showToast('删除失败: ' + ((res && res.error) || ''), false);
+  }
+}
+
+async function processEsimNotifications(seq = 'all') {
+  const slot = getSelectedEsimSlot();
+  showToast('正在向运营商服务器同步并清理通知回执...');
+  const res = await apiCall('euicc.notif_process', { slot, seq, remove_after: true });
+  if (res && res.ok) {
+    showToast(res.msg || '通知回执已处理完成');
+    loadEsimOverview(true);
+  } else {
+    showToast('上报失败: ' + ((res && res.error) || ''), false);
+  }
+}
+
+async function removeEsimNotifications(seq = 'all') {
+  const slot = getSelectedEsimSlot();
+  if (seq === 'all' && !confirm('确定直接清空芯片内所有未上报的通知记录吗？（仅移除本地记录，不会通知运营商）')) return;
+  const res = await apiCall('euicc.notif_remove', { slot, seq });
+  if (res && res.ok) {
+    showToast(res.msg || '通知记录已清空');
+    loadEsimOverview(true);
+  } else {
+    showToast('移除失败: ' + ((res && res.error) || ''), false);
   }
 }
 
