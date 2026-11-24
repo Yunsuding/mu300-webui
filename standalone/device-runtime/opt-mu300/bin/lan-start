@@ -34,6 +34,17 @@ for a in $(ip -4 -o addr show dev br-lan scope global 2>/dev/null | awk '{ print
     [ "$a" = "$LAN_IP/24" ] || ip addr del "$a" dev br-lan 2>/dev/null || true
 done
 ip link set br-lan up
+# Distribute softirq packet processing (RPS) across idle Cortex-A55 cores 1-3 (0x0e), freeing CPU 0 for SIPA IRQ
+if [ ! -f /etc/mu300/rps-disabled ]; then
+    sysctl -qw net.core.rps_sock_flow_entries=16384 2>/dev/null || true
+    for _nif in sipa_eth0 sipa_eth8 wlan0 br-lan usb0 rndis0; do
+        for _rq in /sys/class/net/"$_nif"/queues/rx-*; do
+            [ -d "$_rq" ] || continue
+            echo e > "$_rq/rps_cpus" 2>/dev/null || true
+            echo 4096 > "$_rq/rps_flow_cnt" 2>/dev/null || true
+        done
+    done
+fi
 # the panel extra's Cockpit listens on the LAN address (mu300-panel: ListenStream=ADDRESS:9090, not on the uplink):
 # a changed address moves it along. Only then - at an ordinary boot the drop-in has this address already.
 CP=/etc/systemd/system/cockpit.socket.d/mu300-listen.conf

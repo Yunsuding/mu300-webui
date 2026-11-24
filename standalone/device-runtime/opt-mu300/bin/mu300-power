@@ -705,8 +705,12 @@ guard() {  # temp in 0.1 C: off above 45.0 or below 0, back on under 40.0 and ov
     _gt=$(battery_temp); _gcap=$(capacity); _goff=$(rd "$ST/charge-off"); _glim=$(conf_get CHARGE_TO)
     _gres=$(conf_get RESUME_AT); _gfull=$(conf_get FULL_ONCE)
     case $_gcap in ''|*[!0-9]*) _gcap= ;; esac
-    if [ "$_gfull" = 1 ] && [ "$_gcap" = 100 ] && [ "$(_b=$(battery_dir) && rd "$_b/status")" = Full ]; then
-        conf_set FULL_ONCE 0 && say "full once: the battery is full, back to the limit"; _gfull=0
+    if [ "$_gfull" = 1 ] && [ "$_gcap" = 100 ]; then
+        _gfst=$(_b=$(battery_dir) && rd "$_b/status")
+        _gfcur=$(num "$(_b=$(battery_dir) && rd "$_b/current_now")")
+        if [ "$_gfst" = Full ] || [ "$_gfst" = "Not charging" ] || { [ "$_gfst" != Charging ] && [ "$_gfcur" -le 80000 ]; }; then
+            conf_set FULL_ONCE 0 && say "full once: the battery is full ($_gfst), back to the limit"; _gfull=0
+        fi
     fi
     _glact=   # the limit is in force
     { [ "$_glim" != 100 ] || [ "$_gres" != 0 ]; } && [ "$_gfull" != 1 ] && _glact=1

@@ -115,7 +115,7 @@ def build_stage_tar(extra_vpn_dir: Path, power_conf_override: bool, personal_bac
         for repo_rel, remote_dest, mode in CORE_RUNTIME_FILES:
             src = RUNTIME_DIR / repo_rel
             raw = src.read_bytes()
-            if not raw.startswith(b"\x7fELF"):
+            if not raw.startswith((b"\x7fELF", b"\x1f\x8b")):
                 raw = raw.replace(b"\r\n", b"\n")
             add_item(raw, remote_dest, mode)
 

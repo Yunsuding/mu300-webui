@@ -2889,6 +2889,48 @@ function escapeJs(str) {
     .replace(/>/g, '&gt;');
 }
 
+function onWifiBandOrCountryChange(preferredCh) {
+  const band = document.getElementById('wifi-band')?.value || '5';
+  const cc = (document.getElementById('wifi-country')?.value || 'CN').toUpperCase();
+  const chSel = document.getElementById('wifi-channel');
+  if (!chSel) return;
+  const prev = preferredCh !== undefined ? String(preferredCh) : String(chSel.value || 'auto');
+  let opts = [];
+  if (band === '2.4') {
+    opts = [
+      ['auto', 'auto (自动选择信道)'],
+      ['1', '1 (2412 MHz · 互不干扰推荐)'],
+      ['6', '6 (2437 MHz · 互不干扰推荐)'],
+      ['11', '11 (2462 MHz · 互不干扰推荐)'],
+      ['2', '2'], ['3', '3'], ['4', '4'], ['5', '5'],
+      ['7', '7'], ['8', '8'], ['9', '9'], ['10', '10'], ['12', '12'], ['13', '13']
+    ];
+  } else if (cc === 'JP' || cc === 'TR') {
+    opts = [
+      ['auto', 'auto (自动选择 36-48)'],
+      ['36', '36 (5180 MHz)'],
+      ['40', '40 (5200 MHz)'],
+      ['44', '44 (5220 MHz)'],
+      ['48', '48 (5240 MHz)']
+    ];
+  } else {
+    opts = [
+      ['auto', 'auto (自动选择信道)'],
+      ['149', '149 (5745 MHz · 高功率穿墙推荐)'],
+      ['153', '153 (5765 MHz · 80MHz 高频)'],
+      ['157', '157 (5785 MHz · 80MHz 高频)'],
+      ['161', '161 (5805 MHz · 80MHz 高频)'],
+      ['165', '165 (5825 MHz · 20MHz 独立)'],
+      ['36', '36 (5180 MHz · 室内低频)'],
+      ['40', '40 (5200 MHz)'],
+      ['44', '44 (5220 MHz)'],
+      ['48', '48 (5240 MHz)']
+    ];
+  }
+  chSel.innerHTML = opts.map(([v, label]) => `<option value="${v}">${label}</option>`).join('');
+  chSel.value = opts.some(([v]) => v === prev) ? prev : 'auto';
+}
+
 async function loadWifiTab() {
   fetchWifiClients();
   loadNfcStatus(false);
@@ -2896,12 +2938,32 @@ async function loadWifiTab() {
   if (res && res.ok) {
     if (document.getElementById('wifi-ssid')) document.getElementById('wifi-ssid').value = res.ssid || 'U30Air_5G';
     if (document.getElementById('wifi-band') && res.band) document.getElementById('wifi-band').value = res.band;
+    if (document.getElementById('wifi-country') && res.country) {
+      const ccSel = document.getElementById('wifi-country');
+      const ccUp = String(res.country).toUpperCase();
+      if (!Array.from(ccSel.options).some(o => o.value === ccUp)) {
+        ccSel.insertAdjacentHTML('beforeend', `<option value="${escapeHtml(ccUp)}">${escapeHtml(ccUp)}</option>`);
+      }
+      ccSel.value = ccUp;
+    }
+    onWifiBandOrCountryChange(res.channel || 'auto');
+    const chBadge = document.getElementById('wifi-live-ch-badge');
+    if (chBadge) {
+      if (res.enabled) {
+        const chDisp = res.channel_live || res.channel || 'auto';
+        chBadge.innerText = `CH ${chDisp} · ${res.band || '5'}GHz (${res.country || 'CN'})`;
+        chBadge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+      } else {
+        chBadge.innerText = '已休眠关闭 (5G蜂窝仍在线)';
+        chBadge.className = 'px-2 py-0.5 rounded text-[10px] font-mono bg-slate-800 text-slate-400 border border-slate-700';
+      }
+    }
     const btn = document.getElementById('btn-wifi-toggle');
     if (btn) {
-      btn.innerText = res.enabled ? 'Wi-Fi 已开启' : 'Wi-Fi 已关闭';
+      btn.innerText = res.enabled ? '🟢 Wi-Fi 已开启 (点此关热点省电)' : '⚪ Wi-Fi 已关闭 (点此开启热点)';
       btn.className = res.enabled
-        ? 'px-3 py-1 rounded-lg bg-emerald-500 text-black font-semibold text-xs transition'
-        : 'px-3 py-1 rounded-lg bg-slate-800 text-slate-400 font-semibold text-xs border border-slate-700 transition';
+        ? 'px-3 py-1.5 rounded-lg bg-emerald-500 hover:bg-emerald-400 text-black font-semibold text-xs transition shrink-0'
+        : 'px-3 py-1.5 rounded-lg bg-slate-800 hover:bg-slate-700 text-cyan-300 font-semibold text-xs border border-slate-700 transition shrink-0';
     }
   }
 }
@@ -3023,24 +3085,27 @@ async function saveWifiConfig() {
   const ssid = document.getElementById('wifi-ssid').value.trim();
   const pass = document.getElementById('wifi-pass').value;
   const band = document.getElementById('wifi-band').value;
+  const country = (document.getElementById('wifi-country')?.value || '').trim().toUpperCase();
+  const channel = (document.getElementById('wifi-channel')?.value || 'auto').trim();
   if (!ssid) return showToast('SSID 不能为空', false);
-  showToast('正在保存 Wi-Fi 配置...');
-  const req = { ssid, band };
+  showToast('正在保存 Wi-Fi 热点、国家码与信道配置...');
+  const req = { ssid, band, channel };
+  if (country) req.country = country;
   if (pass) req.password = pass;
   const res = await apiCall('wifi.set', req);
   if (res && res.ok) {
-    showToast('Wi-Fi 配置已生效，正在自动同步 NFC 标签...');
+    showToast('Wi-Fi 配置已生效（热点平滑重启约 3 秒），正在同步 NFC 标签...');
     document.getElementById('wifi-pass').value = '';
-    setTimeout(() => loadNfcStatus(true), 3500);
+    setTimeout(() => { loadWifiTab(); loadNfcStatus(true); }, 3500);
   } else {
-    showToast('保存失败: ' + (res.error || ''), false);
+    showToast('保存失败: ' + ((res && (res.detail || res.error)) || ''), false);
   }
 }
 
 async function toggleWifiPower() {
   const btn = document.getElementById('btn-wifi-toggle');
-  const isUp = btn && btn.innerText.includes('开启');
-  showToast(isUp ? '正在关闭 Wi-Fi...' : '正在开启 Wi-Fi...');
+  const isUp = btn && btn.innerText.includes('已开启');
+  showToast(isUp ? '正在关闭 Wi-Fi 射频省电（5G 蜂窝保持在线）...' : '正在唤醒开启 Wi-Fi 热点...');
   await apiCall('wifi.power', { state: isUp ? 'off' : 'on' });
   setTimeout(loadWifiTab, 2500);
 }
@@ -3225,7 +3290,12 @@ async function loadPowerTab() {
     const saverBelow = Number(conf.SAVER_BELOW !== undefined ? conf.SAVER_BELOW : (res.saver_below || 20));
     const fullOnce = Number(conf.FULL_ONCE !== undefined ? conf.FULL_ONCE : (res.full_once || 0)) === 1;
     const paused = Number(conf.CHARGE_PAUSE !== undefined ? conf.CHARGE_PAUSE : (res.charge_pause || 0)) === 1;
-    window._powerConfState = { chargeTo, resumeAt, saverBelow, fullOnce, paused };
+    const powerOnCharger = Number(conf.POWER_ON_CHARGER !== undefined ? conf.POWER_ON_CHARGER : (res.power_on_charger || 0)) === 1;
+    const batWifiIdle = Number(conf.battery_WIFI_IDLE !== undefined ? conf.battery_WIFI_IDLE : (res.battery_wifi_idle || 0));
+    const plugWifiIdle = Number(conf.plugged_WIFI_IDLE !== undefined ? conf.plugged_WIFI_IDLE : (res.plugged_wifi_idle || 0));
+    window._powerConfState = { chargeTo, resumeAt, saverBelow, fullOnce, paused, powerOnCharger, batWifiIdle, plugWifiIdle };
+
+    renderPerfAndIdleControls(res.perf || null, window._powerConfState);
 
     if (document.getElementById('range-charge-cap')) {
       document.getElementById('range-charge-cap').value = chargeTo;
@@ -3266,6 +3336,131 @@ async function loadPowerTab() {
   const zramRes = await apiCall('zram.get');
   if (zramRes && zramRes.ok && document.getElementById('zram-size')) {
     document.getElementById('zram-size').value = zramRes.enabled ? 'on' : 'off';
+  }
+
+  const ledRes = await apiCall('led.get');
+  if (ledRes && ledRes.ok && document.getElementById('pwr-led-mode')) {
+    const l = ledRes.settings || ledRes.led || ledRes;
+    const modeVal = (l.network === false && l.wifi === false && l.battery === false)
+      ? 'off'
+      : (Number(l.timeout || ledRes.timeout || 0) > 0 ? 'breath' : 'on');
+    document.getElementById('pwr-led-mode').value = modeVal;
+  }
+}
+
+function renderPerfAndIdleControls(perf, pwrState) {
+  if (perf) {
+    const eco = !!perf.cpu_eco_active;
+    const btnFull = document.getElementById('btn-cpu-full');
+    const btnEco = document.getElementById('btn-cpu-eco');
+    if (btnFull) {
+      btnFull.className = 'p-2.5 rounded-xl text-left transition border ' + (!eco ? 'bg-cyan-500/15 border-cyan-500/60' : 'bg-slate-900/80 hover:bg-cyan-500/15 border-slate-800 hover:border-cyan-500/40');
+    }
+    if (btnEco) {
+      btnEco.className = 'p-2.5 rounded-xl text-left transition border ' + (eco ? 'bg-emerald-500/15 border-emerald-500/60' : 'bg-slate-900/80 hover:bg-emerald-500/15 border-slate-800 hover:border-emerald-500/40');
+    }
+    const hint = document.getElementById('cpu-eco-live-hint');
+    if (hint) {
+      const rssTxt = perf.mihomo_rss_mb ? ` (${perf.mihomo_rss_mb}MB 精简模式)` : '';
+      hint.innerText = `CPU7 ${perf.cpu7_online ? '在线' : '已下线省电'} · A76 上限 ${perf.big_cluster_max_mhz || '--'}MHz · Mihomo 绑核 ${perf.mihomo_cpus || '4-7'}${rssTxt}`;
+    }
+    const chkRps = document.getElementById('chk-rps-enable');
+    if (chkRps) chkRps.checked = perf.rps_enabled !== false;
+    const rpsHint = document.getElementById('rps-live-hint');
+    if (rpsHint) {
+      rpsHint.innerText = perf.rps_enabled !== false
+        ? `已开启: sipa_eth0/wlan0/br-lan → CPU 1-3 · Swappiness=${perf.swappiness ?? 20}`
+        : `已关闭: 软中断仅在 CPU 0 · Swappiness=${perf.swappiness ?? 20}`;
+    }
+  }
+  if (pwrState) {
+    const btnPoc = document.getElementById('btn-poc-toggle');
+    if (btnPoc) {
+      btnPoc.innerText = pwrState.powerOnCharger ? '⚡ 已开启: 来电自动进系统' : '⚪ 已关闭: 关机插电仅停充电态';
+      btnPoc.className = 'w-full py-2 px-3 rounded-xl font-semibold transition border ' + (pwrState.powerOnCharger
+        ? 'bg-emerald-500/20 border-emerald-500/50 text-emerald-300'
+        : 'bg-slate-800 hover:bg-slate-700 border-slate-700 text-slate-300');
+    }
+    const setSelectWithCustom = (id, val) => {
+      const sel = document.getElementById(id);
+      if (!sel) return;
+      const sv = String(val || 0);
+      if (!Array.from(sel.options).some(o => o.value === sv)) {
+        sel.insertAdjacentHTML('beforeend', `<option value="${sv}">${sv} 分钟无连接自动休眠</option>`);
+      }
+      sel.value = sv;
+    };
+    setSelectWithCustom('sel-bat-wifi-idle', pwrState.batWifiIdle);
+    setSelectWithCustom('sel-plug-wifi-idle', pwrState.plugWifiIdle);
+  }
+}
+
+async function toggleCpuEcoMode(enableEco) {
+  showToast(enableEco ? '正在切换至 CPU Eco 低温省电模式...' : '正在恢复 8 核满血智能调度...');
+  const res = await apiCall('power.control', { action: enableEco ? 'cpu_eco_on' : 'cpu_eco_off' });
+  if (res && res.ok) {
+    showToast(res.msg || 'CPU 档位已切换');
+    renderPerfAndIdleControls(res.perf || null, window._powerConfState || null);
+    await loadPowerTab();
+  } else {
+    showToast('切换失败: ' + ((res && res.error) || ''), false);
+  }
+}
+
+async function toggleRpsAccel(enabled) {
+  showToast(enabled ? '正在开启多核软中断 RPS 加速 (CPU 1-3)...' : '正在关闭多核 RPS 加速...');
+  const res = await apiCall('perf.set', { rps_enabled: !!enabled });
+  if (res && res.ok) {
+    showToast(res.msg || 'RPS 配置已生效');
+    renderPerfAndIdleControls(res, window._powerConfState || null);
+  } else {
+    showToast('设置失败: ' + ((res && res.error) || ''), false);
+  }
+}
+
+async function togglePowerOnCharger() {
+  const st = window._powerConfState || {};
+  const nextAct = st.powerOnCharger ? 'power_on_charger_off' : 'power_on_charger_on';
+  const res = await apiCall('power.control', { action: nextAct });
+  if (res && res.ok) {
+    showToast(res.msg || '来电自动开机策略已更新');
+    await loadPowerTab();
+  } else {
+    showToast('设置失败: ' + ((res && res.error) || ''), false);
+  }
+}
+
+async function saveWifiIdlePolicy() {
+  const batMin = parseInt(document.getElementById('sel-bat-wifi-idle')?.value || '0', 10) || 0;
+  const plugMin = parseInt(document.getElementById('sel-plug-wifi-idle')?.value || '0', 10) || 0;
+  showToast('正在保存 Wi-Fi 空闲自动休眠策略...');
+  const res = await apiCall('power.control', {
+    battery_wifi_idle: batMin,
+    plugged_wifi_idle: plugMin,
+    idle_only_save: true
+  });
+  if (res && res.ok) {
+    showToast(res.msg || 'Wi-Fi 空闲省电休眠策略已生效');
+    await loadPowerTab();
+  } else {
+    showToast('保存失败: ' + ((res && res.error) || ''), false);
+  }
+}
+
+async function quickSetLedMode(mode) {
+  const isOn = mode !== 'off';
+  showToast(mode === 'off' ? '正在关闭全机状态指示灯 (零光污染)...' : '正在更新机身指示灯策略...');
+  const res = await apiCall('led.set', {
+    network: isOn,
+    wifi: isOn,
+    battery: isOn,
+    timeout: mode === 'breath' ? 60 : 0
+  });
+  if (res && res.ok) {
+    if (document.getElementById('sys-led')) document.getElementById('sys-led').value = mode;
+    showToast(mode === 'off' ? '机身指示灯已全部熄灭' : (mode === 'breath' ? '已设为亮 60 秒后自动熄灭' : '已恢复常亮状态指示'));
+  } else {
+    showToast('设置指示灯失败: ' + ((res && (res.detail || res.error)) || ''), false);
   }
 }
 

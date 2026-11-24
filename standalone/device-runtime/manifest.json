@@ -142,8 +142,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 69,
-      "sha256": "70f390ad5f16c6dcc3aaad1eadfc146e94970c557e451d197d5fdf669ddc2b8b"
+      "size": 162,
+      "sha256": "127c4af3ce1891ce7b1031e684e4461aee0162a79ec38ea41621dd70efdf6743"
     },
     {
       "device_path": "/etc/sysctl.d/98-mu300-modules.conf",
@@ -1715,8 +1715,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 3495,
-      "sha256": "14f91473f1cb7b8239e10d6b914dcba28d39c4a7f39295b6593ee1fe91944f90"
+      "size": 4029,
+      "sha256": "05e1c08f04f61a1125130eb01586e2556c90066f907d29c7a1ce08cb7b45917c"
     },
     {
       "device_path": "/opt/mu300/bin/logdw",
@@ -1775,8 +1775,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 98744,
-      "sha256": "a74b6df4dfeba4d5f10cd73a3dc541ac31326f6c73fb526264d583262cb401e2"
+      "size": 99025,
+      "sha256": "188a52672313d5719b911b4340898b5b60280b0af6687d6ed04c8b4edf62b347"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-at",
@@ -1995,8 +1995,8 @@
       "uid": 0,
       "gid": 0,
       "type": "file",
-      "size": 52943,
-      "sha256": "bc4ac598960354077b43c563d3ef2d6e01ca1ebc85a3645943426a1edaa95732"
+      "size": 53164,
+      "sha256": "db97bb527f99ce6c4512b7f0c1ccea3fd49e490c2311af16db20ca94934acf2e"
     },
     {
       "device_path": "/opt/mu300/bin/mu300-sim",

@@ -1977,6 +1977,7 @@ def build_merged_vpn_config(apply_live=True):
 
     out = []
     out.append(f"log-level: {log_level}\n")
+    out.append("geodata-loader: memconservative\n")
     out.append("proxies:\n")
     out.extend(all_proxy_lines)
     out.append("proxy-groups:\n")
@@ -3133,6 +3134,7 @@ def start_log_guardian():
                 avail_mem_mb = get_mem_available_mb()
                 if avail_mem_mb is not None and avail_mem_mb < 400:
                     drop_memory_caches()
+                apply_perf_tuning()
             except Exception:
                 pass
 
@@ -3206,6 +3208,212 @@ def get_overview_data(req=None):
 
 get_overview_info = get_overview_data
 
+PERF_CONF_FILE = "/etc/mu300/perf-tuning.json"
+RPS_TARGET_IFACES = ("sipa_eth0", "sipa_eth8", "wlan0", "br-lan", "usb0", "rndis0", "mh-mu300")
+
+
+def load_perf_conf():
+    base = {
+        "rps_enabled": True,
+        "rps_mask": "e",
+        "swappiness": 20,
+        "cpu_eco_active": False,
+    }
+    if os.path.exists(PERF_CONF_FILE):
+        try:
+            with open(PERF_CONF_FILE, "r", encoding="utf-8", errors="ignore") as f:
+                data = json.load(f)
+            if isinstance(data, dict):
+                base["rps_enabled"] = bool(data.get("rps_enabled", True))
+                mask = str(data.get("rps_mask", "e") or "e").strip().lower()
+                if re.fullmatch(r"[0-9a-f]{1,2}", mask):
+                    base["rps_mask"] = mask
+                base["swappiness"] = max(5, min(100, int(data.get("swappiness", 20))))
+                base["cpu_eco_active"] = bool(data.get("cpu_eco_active", False))
+        except Exception:
+            pass
+    return base
+
+
+def save_perf_conf(conf):
+    _atomic_write_text(PERF_CONF_FILE, json.dumps(conf, ensure_ascii=False, indent=2) + "\n", mode=0o644)
+
+
+def _write_sysfs_quiet(path, val):
+    try:
+        if os.path.exists(path):
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(str(val) + "\n")
+            return True
+    except Exception:
+        pass
+    return False
+
+
+def apply_perf_tuning(conf=None):
+    """在 Linux 实机上无损应用多核网卡软中断 RPS/RFS 均衡 (CPU 1-3)、vm.swappiness 与可选主动式 CPU Eco 温控"""
+    cfg = conf if isinstance(conf, dict) else load_perf_conf()
+    if not sys.platform.startswith("linux"):
+        return cfg
+    rps_on = bool(cfg.get("rps_enabled", True))
+    rps_mask = str(cfg.get("rps_mask", "e") or "e") if rps_on else "0"
+    swp = max(5, min(100, int(cfg.get("swappiness", 20))))
+
+    rps_dis_flag = "/etc/mu300/rps-disabled"
+    try:
+        if rps_on and os.path.exists(rps_dis_flag):
+            os.remove(rps_dis_flag)
+        elif not rps_on:
+            _atomic_write_text(rps_dis_flag, "1\n", mode=0o644)
+    except Exception:
+        pass
+
+    _write_sysfs_quiet("/proc/sys/vm/swappiness", swp)
+    _write_sysfs_quiet("/proc/sys/net/core/rps_sock_flow_entries", 16384 if rps_on else 0)
+    _write_sysfs_quiet("/proc/sys/net/core/netdev_max_backlog", 4096)
+
+    for iface in RPS_TARGET_IFACES:
+        qroot = f"/sys/class/net/{iface}/queues"
+        if not os.path.isdir(qroot):
+            continue
+        try:
+            for qname in os.listdir(qroot):
+                if not qname.startswith("rx-"):
+                    continue
+                _write_sysfs_quiet(os.path.join(qroot, qname, "rps_cpus"), rps_mask)
+                _write_sysfs_quiet(os.path.join(qroot, qname, "rps_flow_cnt"), 4096 if rps_on else 0)
+        except Exception:
+            pass
+
+    if cfg.get("cpu_eco_active"):
+        _write_sysfs_quiet("/sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq", 1500000)
+        _write_sysfs_quiet("/sys/devices/system/cpu/cpu7/online", 0)
+    return cfg
+
+
+def set_cpu_eco_live(enable):
+    """立即切换主动式 CPU Eco 低温省电档 (下线 CPU7 超大核 + A76 限频 1.5GHz) 或恢复 8 核满血均衡"""
+    eco = bool(enable)
+    cfg = load_perf_conf()
+    cfg["cpu_eco_active"] = eco
+    save_perf_conf(cfg)
+
+    power_bin = "/opt/mu300/bin/mu300-power"
+    cpu_bin = "/opt/mu300/bin/mu300-cpu"
+    if sys.platform.startswith("linux"):
+        if os.path.exists(power_bin):
+            val = "eco" if eco else "full"
+            subprocess.run([power_bin, "set", "plugged.CPU", val], capture_output=True, timeout=6)
+            subprocess.run([power_bin, "set", "battery.CPU", val], capture_output=True, timeout=6)
+        if os.path.exists(cpu_bin):
+            subprocess.run([cpu_bin, "profile", "saving" if eco else "balanced"], capture_output=True, timeout=8)
+        if eco:
+            _write_sysfs_quiet("/sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq", 1500000)
+            _write_sysfs_quiet("/sys/devices/system/cpu/cpu7/online", 0)
+        else:
+            _write_sysfs_quiet("/sys/devices/system/cpu/cpu7/online", 1)
+            max_khz = "2301000"
+            try:
+                with open("/sys/devices/system/cpu/cpufreq/policy4/cpuinfo_max_freq", "r", encoding="utf-8") as f:
+                    v = f.read().strip()
+                    if v.isdigit():
+                        max_khz = v
+            except Exception:
+                pass
+            _write_sysfs_quiet("/sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq", max_khz)
+    return cfg
+
+
+def get_perf_status():
+    cfg = load_perf_conf()
+    live_swp = cfg["swappiness"]
+    rps_ifaces = {}
+    cpu7_online = True
+    big_max_mhz = 2301
+    mihomo_cpus = ""
+    mihomo_rss_mb = None
+
+    if sys.platform.startswith("linux"):
+        try:
+            with open("/proc/sys/vm/swappiness", "r", encoding="utf-8") as f:
+                live_swp = int(f.read().strip())
+        except Exception:
+            pass
+        for iface in ("sipa_eth0", "wlan0", "br-lan"):
+            rp = f"/sys/class/net/{iface}/queues/rx-0/rps_cpus"
+            if os.path.exists(rp):
+                try:
+                    with open(rp, "r", encoding="utf-8") as f:
+                        rps_ifaces[iface] = f.read().strip()
+                except Exception:
+                    pass
+        try:
+            if os.path.exists("/sys/devices/system/cpu/cpu7/online"):
+                with open("/sys/devices/system/cpu/cpu7/online", "r", encoding="utf-8") as f:
+                    cpu7_online = (f.read().strip() != "0")
+        except Exception:
+            pass
+        try:
+            if os.path.exists("/sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq"):
+                with open("/sys/devices/system/cpu/cpufreq/policy4/scaling_max_freq", "r", encoding="utf-8") as f:
+                    big_max_mhz = round(int(f.read().strip()) / 1000)
+        except Exception:
+            pass
+        try:
+            proc_p = subprocess.run(["pidof", "mihomo"], capture_output=True, text=True, timeout=2)
+            mpids = (proc_p.stdout or "").strip().split()
+            if mpids:
+                with open(f"/proc/{mpids[0]}/status", "r", encoding="utf-8", errors="ignore") as sf:
+                    for line in sf:
+                        if line.startswith("Cpus_allowed_list:"):
+                            mihomo_cpus = line.split(":", 1)[1].strip()
+                        elif line.startswith("VmRSS:"):
+                            kb = int(re.sub(r"[^0-9]", "", line) or "0")
+                            mihomo_rss_mb = round(kb / 1024.0, 1)
+        except Exception:
+            pass
+
+    eco_now = bool(cfg.get("cpu_eco_active") or (not cpu7_online) or big_max_mhz <= 1550)
+    return {
+        "ok": 1,
+        "rps_enabled": bool(cfg.get("rps_enabled", True)),
+        "rps_mask": cfg.get("rps_mask", "e"),
+        "rps_live": rps_ifaces,
+        "swappiness": live_swp,
+        "cpu_eco_active": eco_now,
+        "cpu7_online": cpu7_online,
+        "big_cluster_max_mhz": big_max_mhz,
+        "mihomo_cpus": mihomo_cpus or "4-7",
+        "mihomo_rss_mb": mihomo_rss_mb,
+        "geodata_memconservative": True,
+    }
+
+
+def handle_perf_api(method, req_data):
+    req_data = req_data if isinstance(req_data, dict) else {}
+    if method == "perf.get":
+        return get_perf_status()
+    if method == "perf.set":
+        cfg = load_perf_conf()
+        msgs = []
+        if "rps_enabled" in req_data:
+            cfg["rps_enabled"] = bool(req_data["rps_enabled"])
+            msgs.append(f"多核软中断加速 RPS 已{'开启 (CPU 1-3)' if cfg['rps_enabled'] else '关闭'}")
+        if "swappiness" in req_data:
+            cfg["swappiness"] = max(5, min(100, int(req_data["swappiness"])))
+            msgs.append(f"内存交换倾向 swappiness={cfg['swappiness']}")
+        save_perf_conf(cfg)
+        apply_perf_tuning(cfg)
+        if "cpu_eco_active" in req_data:
+            eco = bool(req_data["cpu_eco_active"])
+            set_cpu_eco_live(eco)
+            msgs.append("已开启 CPU Eco 低温省电档 (关超大核 + 1.5GHz)" if eco else "已恢复 8 核满血智能调度")
+        st = get_perf_status()
+        st["msg"] = "；".join(msgs) if msgs else "系统性能调优参数已更新"
+        return st
+    return None
+
+
 def _read_power_conf_dict():
     conf = {
         "CHARGE_TO": 80,
@@ -3213,7 +3421,16 @@ def _read_power_conf_dict():
         "SAVER_BELOW": 20,
         "CHARGE_PAUSE": 0,
         "FULL_ONCE": 0,
+        "POWER_ON_CHARGER": 0,
+        "plugged_WIFI_IDLE": 0,
+        "battery_WIFI_IDLE": 0,
+        "saver_WIFI_IDLE": 5,
+        "plugged_CPU": "full",
+        "battery_CPU": "full",
+        "plugged_LEDS_IDLE": "on",
+        "battery_LEDS_IDLE": "off",
     }
+    int_keys = {"CHARGE_TO", "RESUME_AT", "SAVER_BELOW", "CHARGE_PAUSE", "FULL_ONCE", "POWER_ON_CHARGER", "plugged_WIFI_IDLE", "battery_WIFI_IDLE", "saver_WIFI_IDLE"}
     if os.path.exists("/etc/mu300/power.conf"):
         try:
             with open("/etc/mu300/power.conf", "r", encoding="utf-8", errors="ignore") as f:
@@ -3224,7 +3441,7 @@ def _read_power_conf_dict():
                     k, v = s.split("=", 1)
                     k = k.strip()
                     v = v.strip().strip("'\"")
-                    if k in conf:
+                    if k in int_keys:
                         try:
                             conf[k] = int(v)
                         except Exception:
@@ -3246,7 +3463,7 @@ def _apply_power_guard_reload():
     OVERVIEW_API_CACHE["time"] = 0
 
 def handle_power_api(method, req_data):
-    """增强电源与电池养护控制：支持 60%/50% 长期插电养护、80%/70% 随身备电、回充滞回与单次充满"""
+    """增强电源与电池养护控制：支持 60%/50% 长期插电养护、80%/70% 随身备电、来电自动开机、Wi-Fi 空闲休眠与 CPU Eco"""
     req_data = req_data if isinstance(req_data, dict) else {}
     power_bin = "/opt/mu300/bin/mu300-power"
 
@@ -3263,16 +3480,26 @@ def handle_power_api(method, req_data):
         resp["saver_below"] = conf_obj.get("SAVER_BELOW", 20)
         resp["charge_pause"] = conf_obj.get("CHARGE_PAUSE", 0)
         resp["full_once"] = conf_obj.get("FULL_ONCE", 0)
+        resp["power_on_charger"] = conf_obj.get("POWER_ON_CHARGER", 0)
+        resp["plugged_wifi_idle"] = conf_obj.get("plugged_WIFI_IDLE", 0)
+        resp["battery_wifi_idle"] = conf_obj.get("battery_WIFI_IDLE", 0)
+        resp["perf"] = get_perf_status()
         return resp
 
+    allowed_set_keys = {
+        "CHARGE_TO", "RESUME_AT", "SAVER_BELOW", "CHARGE_PAUSE", "FULL_ONCE", "POWER_ON_CHARGER",
+        "plugged.WIFI_IDLE", "battery.WIFI_IDLE", "saver.WIFI_IDLE",
+        "plugged.LEDS_IDLE", "battery.LEDS_IDLE", "saver.LEDS_IDLE",
+        "plugged.CPU", "battery.CPU", "saver.CPU",
+    }
     if method == "power.set" and os.path.exists(power_bin):
         key = str(req_data.get("key", "")).strip()
         val = req_data.get("value", "")
-        if key in ("CHARGE_TO", "RESUME_AT", "SAVER_BELOW", "CHARGE_PAUSE", "FULL_ONCE"):
+        if key in allowed_set_keys:
             proc = subprocess.run([power_bin, "set", key, str(val)], capture_output=True, text=True, timeout=6)
             if proc.returncode != 0:
                 return {"ok": 0, "error": (proc.stderr or proc.stdout or "power_set_failed").strip()}
-            if key in ("CHARGE_TO", "RESUME_AT", "CHARGE_PAUSE", "FULL_ONCE") and req_data.get("reload", True):
+            if req_data.get("reload", True):
                 _apply_power_guard_reload()
             else:
                 BATTERY_INFO_CACHE["time"] = 0
@@ -3293,7 +3520,7 @@ def handle_power_api(method, req_data):
             msg = "已切换至「日常随身均衡模式」(80% 停充旁路 / 低于 70% 自动回充)"
         elif action == "full_once":
             steps = [("charge", "full")]
-            msg = "已开启「出门前单次充满 100%」，充满拔电后自动恢复日常养护上限"
+            msg = "已开启「出门前单次充满 100%」，充满 100% 后自动恢复日常养护上限"
         elif action == "cancel_full_once":
             steps = [("set", "FULL_ONCE", "0")]
             msg = "已取消单次充满，恢复按设定上限停充保护"
@@ -3303,6 +3530,21 @@ def handle_power_api(method, req_data):
         elif action == "resume":
             steps = [("charge", "resume")]
             msg = "已恢复自动充电护航策略"
+        elif action in ("power_on_charger_on", "power_on_charger_off"):
+            poc_v = "1" if action == "power_on_charger_on" else "0"
+            steps = [("set", "POWER_ON_CHARGER", poc_v)]
+            msg = "已开启「断电再来电自动开机进系统」（无人值守推荐）" if poc_v == "1" else "已关闭来电自动进系统（关机插电仅停留在充电态）"
+        elif action in ("cpu_eco_on", "cpu_eco_off"):
+            eco_on = (action == "cpu_eco_on")
+            set_cpu_eco_live(eco_on)
+            BATTERY_INFO_CACHE["time"] = 0
+            OVERVIEW_API_CACHE["time"] = 0
+            return {
+                "ok": 1,
+                "msg": "已开启「🍃 CPU Eco 低温长续航」(下线超大核 CPU7 + 大核限频 1.5GHz)" if eco_on else "已恢复「🚀 8 核满血智能调度」(CPU7 上线 + 2.3GHz)",
+                "conf": _read_power_conf_dict(),
+                "perf": get_perf_status(),
+            }
         else:
             if "charge_to" in req_data:
                 ct = max(50, min(100, int(req_data["charge_to"])))
@@ -3320,6 +3562,16 @@ def handle_power_api(method, req_data):
             if "saver_below" in req_data:
                 sb = max(5, min(50, int(req_data["saver_below"])))
                 steps.append(("set", "SAVER_BELOW", str(sb)))
+            if "power_on_charger" in req_data:
+                steps.append(("set", "POWER_ON_CHARGER", "1" if req_data["power_on_charger"] else "0"))
+            if "battery_wifi_idle" in req_data:
+                bwi = max(0, min(1440, int(req_data["battery_wifi_idle"])))
+                steps.append(("set", "battery.WIFI_IDLE", str(bwi)))
+            if "plugged_wifi_idle" in req_data:
+                pwi = max(0, min(1440, int(req_data["plugged_wifi_idle"])))
+                steps.append(("set", "plugged.WIFI_IDLE", str(pwi)))
+            if "idle_only_save" in req_data:
+                msg = "无人值守与无线休眠策略已保存并生效"
 
         for st_cmd in steps:
             proc = subprocess.run([power_bin] + list(st_cmd), capture_output=True, text=True, timeout=6)
@@ -3332,6 +3584,7 @@ def handle_power_api(method, req_data):
             "msg": msg,
             "conf": _read_power_conf_dict(),
             "battery": get_battery_info(force=True),
+            "perf": get_perf_status(),
         }
 
     return None
@@ -5774,6 +6027,10 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 self.send_json(get_overview_data(req_data))
                 return
 
+            if method in ("perf.get", "perf.set"):
+                self.send_json(handle_perf_api(method, req_data))
+                return
+
             if method in ("power.get", "power.set", "power.control"):
                 pwr_resp = handle_power_api(method, req_data)
                 if pwr_resp is not None:
@@ -5795,7 +6052,27 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 self.send_json(nfc_resp)
                 return
 
-            resp = run_mu300_api(method, req_data)
+            api_req_data = dict(req_data) if isinstance(req_data, dict) else {}
+            if method == "wifi.set" and isinstance(api_req_data.get("country"), str):
+                cc_val = api_req_data["country"].strip().upper()
+                if re.fullmatch(r"[A-Z0-9]{2}", cc_val) and os.path.exists(HOTSPOT_CONF_PATH):
+                    try:
+                        with open(HOTSPOT_CONF_PATH, "r", encoding="utf-8", errors="ignore") as hf:
+                            h_lines = [ln for ln in hf.read().splitlines() if not ln.startswith("COUNTRY=")]
+                        h_lines.append(f"COUNTRY={cc_val}")
+                        _atomic_write_text(HOTSPOT_CONF_PATH, "\n".join(h_lines) + "\n", mode=0o600)
+                    except Exception:
+                        pass
+                resp = run_mu300_api(method, api_req_data)
+                if isinstance(resp, dict) and not resp.get("ok") and resp.get("detail") == "country":
+                    fallback_req = {k: v for k, v in api_req_data.items() if k != "country"}
+                    if fallback_req:
+                        resp = run_mu300_api(method, fallback_req)
+                    else:
+                        subprocess.run(["systemctl", "restart", "mu300-hotspot"], capture_output=True, timeout=20)
+                        resp = {"ok": 1, "restart": True}
+            else:
+                resp = run_mu300_api(method, req_data)
             if method == "wifi.set" and isinstance(resp, dict) and resp.get("ok"):
                 trigger_nfc_wifi_sync_async()
             if method.startswith("power.") or method.startswith("wifi.") or method.startswith("vpn."):
@@ -6416,6 +6693,7 @@ def main():
     print(f"[*] 静态文件根目录: {WEB_DIR}")
     print(f"[*] 监听端口: {PORT}")
     _ensure_i2c_dev_ready()
+    apply_perf_tuning()
     update_public_ip_async()
     start_log_guardian()
     start_comm_and_quota_watcher()

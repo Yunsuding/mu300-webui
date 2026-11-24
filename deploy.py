@@ -150,6 +150,7 @@ def deploy(target_host: str = None, check_only: bool = False, with_runtime: bool
             (RUNTIME_BASE / "systemd/mu300-atd.service.d/u30air-slot0.conf", "/etc/systemd/system/mu300-atd.service.d/u30air-slot0.conf", "644"),
             (RUNTIME_BASE / "systemd/mu300-atd2.service.d/u30air-slot0.conf", "/etc/systemd/system/mu300-atd2.service.d/u30air-slot0.conf", "644"),
             (RUNTIME_BASE / "systemd/mu300-mobile-data.service.d/fast-redial.conf", "/etc/systemd/system/mu300-mobile-data.service.d/fast-redial.conf", "644"),
+            (RUNTIME_BASE / "system-tuning/sysctl.d/90-u30air-emmc.conf", "/etc/sysctl.d/90-u30air-emmc.conf", "644"),
             (RUNTIME_BASE / "extra-vpn/bin/mu300-vpn", "/mnt/mu300-disk/extra/vpn/bin/mu300-vpn", "755"),
             (RUNTIME_BASE / "extra-vpn/lib/vpn/mihomo.sh", "/mnt/mu300-disk/extra/vpn/lib/vpn/mihomo.sh", "755"),
         ]

@@ -38,8 +38,10 @@ With upstream `mu300-linux` shifting focus to OpenWrt, this repository preserves
 3. **Adaptive Single / Multi-Subscription Mihomo Proxy & Dual-Stack Client Routing**:
    - Add one or multiple Clash/Mihomo subscriptions directly in the WebUI to auto-build isolated policy groups with live exit-IP probing.
    - Bind individual Wi-Fi/LAN clients to specific policy groups or `DIRECT` with automatic IPv4 (`/32`) + SLAAC global IPv6 (`/128`) rule injection, private Unix socket control (`/run/mu300-vpn/mihomo-control.sock`), Sniffer `502` protection, and automatic Tailscale bypass coexistence.
-4. **Hardware-Level 0mA Battery Bypass & Performance Tuning**:
-   - Programs Unisoc 5.4 charger IC `REG01` + `REG05` watchdog for true **0mA battery bypass** when plugged in 24/7 (prevents lithium battery swelling), pins Mihomo to **CPU 4–7 (Cortex-A76)**, keeps 5G online when Wi-Fi is idle, and caps `journald` at 8 MB to protect the 3.9 GB eMMC.
+4. **Hardware-Level 0mA Battery Bypass, Multi-Core Network Pipeline & Unattended Server Controls**:
+   - Programs Unisoc 5.4 charger IC `REG01` + `REG05` watchdog for true **0mA battery bypass** when plugged in 24/7 (with automatic `FULL_ONCE` reset at 100% even when the vendor driver reports `Unknown` status).
+   - **3-Stage 8-Core Network Pipeline**: Spreads packet `NET_RX` softirqs across **CPU 1–3 (`RPS=0x0e` + `RFS`)** so `CPU 0` handles `multi-sipa-0` baseband IRQs while **CPU 4–7 (Cortex-A76)** run Mihomo with `geodata-loader: memconservative` (~25% lower RAM) and `vm.swappiness=20`.
+   - **Wi-Fi Regulatory / Channel Control & Eco Modes**: Switch Wi-Fi country code (`CN`/`US`/`SG`/etc. to unlock high-power 5GHz channels `149–165` at `80 MHz`), toggle SoftAP RF or per-supply `WIFI_IDLE` sleep while keeping 5G online, switch **Active CPU Eco Mode** (`cpu7` offline + `1.5 GHz` cap) or **4G-Only Power Save**, enable **Auto-Boot on Charger (`POWER_ON_CHARGER`)**, set **Dark Night LED Mode**, and cap `journald` at 8 MB to protect the 3.9 GB eMMC.
 
 ---
 

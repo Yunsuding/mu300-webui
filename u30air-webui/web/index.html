@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>U30 Air 5G · 智能控制台</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0' stop-color='%2306b6d4'/%3E%3Cstop offset='1' stop-color='%234f46e5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Ctext x='32' y='41' text-anchor='middle' fill='%23fff' font-family='system-ui,sans-serif' font-weight='900' font-size='26'%3E5G%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/app.css?v=23476821">
+  <link rel="stylesheet" href="/app.css?v=02df4451">
 </head>
 <body class="bg-[#0b0f19] text-slate-200 font-sans antialiased min-h-screen flex flex-col scrollbar-thin selection:bg-cyan-500 selection:text-white relative">
 
@@ -705,7 +705,7 @@
               </div>
 
               <!-- 一键快捷锁频预设 -->
-              <div class="grid grid-cols-2 sm:grid-cols-5 gap-2 text-xs font-mono">
+              <div class="grid grid-cols-2 sm:grid-cols-3 lg:grid-cols-6 gap-2 text-xs font-mono">
                 <button onclick="quickLockBand('41')" class="py-1.5 px-2.5 rounded-xl bg-slate-900/90 hover:bg-cyan-950/60 border border-slate-800 hover:border-cyan-500/40 text-cyan-300 transition flex items-center justify-center gap-1">
                   <span>⚡</span> 锁 N41 (移动)
                 </button>
@@ -717,6 +717,9 @@
                 </button>
                 <button onclick="quickLockBand('28')" class="py-1.5 px-2.5 rounded-xl bg-slate-900/90 hover:bg-cyan-950/60 border border-slate-800 hover:border-cyan-500/40 text-cyan-300 transition flex items-center justify-center gap-1">
                   <span>📶</span> 锁 N28 (700M)
+                </button>
+                <button onclick="applyNetMode('4g')" class="py-1.5 px-2.5 rounded-xl bg-slate-900/90 hover:bg-amber-950/60 border border-slate-800 hover:border-amber-500/40 text-amber-300 transition flex items-center justify-center gap-1" title="弱信号或纯待机收码时切 4G LTE 可降低约 35% 基带发热与功耗">
+                  <span>🍃</span> 仅 4G 省电
                 </button>
                 <button onclick="quickLockBand('unlock')" class="py-1.5 px-2.5 rounded-xl bg-slate-900/90 hover:bg-emerald-950/60 border border-slate-800 hover:border-emerald-500/40 text-emerald-300 transition flex items-center justify-center gap-1">
                   <span>🔄</span> 全频段自动
@@ -1453,27 +1456,62 @@
 
       <div class="grid grid-cols-1 lg:grid-cols-2 gap-5">
         <div class="glass-card rounded-2xl p-5 space-y-4">
-          <div class="flex items-center justify-between pb-3 border-b border-slate-800">
-            <h3 class="font-semibold text-white">Wi-Fi 热点 (SoftAP)</h3>
-            <button onclick="toggleWifiPower()" id="btn-wifi-toggle" class="px-3 py-1 rounded-lg bg-emerald-500 text-black font-semibold text-xs transition">Wi-Fi 已开启</button>
+          <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
+            <div>
+              <div class="flex items-center gap-2">
+                <h3 class="font-semibold text-white">Wi-Fi 热点 (SoftAP)</h3>
+                <span id="wifi-live-ch-badge" class="px-2 py-0.5 rounded text-[10px] font-mono bg-cyan-500/15 text-cyan-300 border border-cyan-500/30">读取信道...</span>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-0.5">纯远程当服务器/短信盒子用时可关闭 Wi-Fi 省电降温（5G 蜂窝与远程组网保持在线）</p>
+            </div>
+            <button onclick="toggleWifiPower()" id="btn-wifi-toggle" class="px-3 py-1.5 rounded-lg bg-emerald-500 text-black font-semibold text-xs transition shrink-0">Wi-Fi 已开启</button>
           </div>
           <div class="space-y-3 text-xs">
-            <div>
-              <label class="text-slate-400">热点名称 (SSID)</label>
-              <input type="text" id="wifi-ssid" value="U30Air_5G" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
-            </div>
-            <div>
-              <label class="text-slate-400">Wi-Fi 密码</label>
-              <input type="password" id="wifi-pass" placeholder="保持原密码留空" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="text-slate-400">热点名称 (SSID)</label>
+                <input type="text" id="wifi-ssid" value="U30Air_5G" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+              </div>
+              <div>
+                <label class="text-slate-400">Wi-Fi 密码</label>
+                <input type="password" id="wifi-pass" placeholder="保持原密码留空" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+              </div>
             </div>
             <div>
               <label class="text-slate-400">频段选择</label>
-              <select id="wifi-band" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
-                <option value="5">5 GHz (Wi-Fi 6 高速稳定 - 推荐)</option>
-                <option value="2.4">2.4 GHz (远距离兼容)</option>
+              <select id="wifi-band" onchange="onWifiBandOrCountryChange()" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+                <option value="5">5 GHz (80MHz 高速抗干扰 - 推荐)</option>
+                <option value="2.4">2.4 GHz (远距离穿墙省电)</option>
               </select>
             </div>
-            <button onclick="saveWifiConfig()" class="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs rounded-xl transition">保存热点配置</button>
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="text-slate-400">无线国家/地区码 (决定合法功率与信道)</label>
+                <select id="wifi-country" onchange="onWifiBandOrCountryChange()" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+                  <option value="CN">CN 中国大陆 (解锁 149-165 高频穿墙)</option>
+                  <option value="US">US 美国 (36-48 / 149-165 全频段)</option>
+                  <option value="SG">SG 新加坡 (全频段)</option>
+                  <option value="JP">JP 日本 (室内 36-48)</option>
+                  <option value="DE">DE 欧洲/德国</option>
+                  <option value="TR">TR 默认兼容 (仅 36-48)</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-slate-400">无线信道 (5G 推荐 149 穿墙更强)</label>
+                <select id="wifi-channel" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white font-mono">
+                  <option value="auto">auto (自动选择信道)</option>
+                  <option value="149">149 (5745 MHz · 高功率穿墙推荐)</option>
+                  <option value="153">153 (5765 MHz)</option>
+                  <option value="157">157 (5785 MHz)</option>
+                  <option value="161">161 (5805 MHz)</option>
+                  <option value="36">36 (5180 MHz · 室内低频)</option>
+                  <option value="40">40 (5200 MHz)</option>
+                  <option value="44">44 (5220 MHz)</option>
+                  <option value="48">48 (5240 MHz)</option>
+                </select>
+              </div>
+            </div>
+            <button onclick="saveWifiConfig()" class="w-full py-2 bg-cyan-600 hover:bg-cyan-500 text-black font-bold text-xs rounded-xl transition">保存热点、国家码与信道配置</button>
           </div>
         </div>
 
@@ -1865,24 +1903,113 @@
         </div>
 
         <div class="glass-card rounded-2xl p-5 space-y-4">
-          <h3 class="font-semibold text-white pb-3 border-b border-slate-800">CPU 调频与 ZRAM 内存优化</h3>
-          <div class="space-y-3 text-xs">
+          <div class="flex flex-wrap items-center justify-between gap-2 pb-3 border-b border-slate-800">
             <div>
-              <label class="text-slate-400">CPU 核心调度模式 (mu300-cpu)</label>
-              <select id="cpu-governor" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
-                <option value="balanced">Balanced (智能均衡调度 - 默认推荐)</option>
-                <option value="performance">Performance (全核高性能满血)</option>
-                <option value="saving">Saving (省电低功耗长续航)</option>
-              </select>
+              <h3 class="font-semibold text-white">CPU 温控档位、多核加速与 ZRAM 优化</h3>
+              <p class="text-[11px] text-slate-400 mt-0.5" id="cpu-eco-live-hint">正在读取大核频率与 Mihomo 绑核状态...</p>
             </div>
+          </div>
+          <div class="space-y-3.5 text-xs">
+            <div class="grid grid-cols-2 gap-2.5">
+              <button onclick="toggleCpuEcoMode(false)" id="btn-cpu-full" class="p-2.5 rounded-xl bg-cyan-500/15 border border-cyan-500/50 text-left transition">
+                <div class="font-semibold text-cyan-300">🚀 8 核满血智能调度</div>
+                <div class="text-[10px] text-slate-400 mt-0.5 font-mono">CPU7 在线 · A76 最高 2.3GHz</div>
+              </button>
+              <button onclick="toggleCpuEcoMode(true)" id="btn-cpu-eco" class="p-2.5 rounded-xl bg-slate-900/80 hover:bg-emerald-500/15 border border-slate-800 hover:border-emerald-500/40 text-left transition">
+                <div class="font-semibold text-emerald-400">🍃 Eco 低温长续航</div>
+                <div class="text-[10px] text-slate-400 mt-0.5 font-mono">下线超大核 CPU7 · 限频 1.5GHz</div>
+              </button>
+            </div>
+
+            <!-- 多核网卡软中断 RPS/RFS 加速开关 -->
+            <div class="p-3 rounded-xl bg-slate-900/75 border border-slate-800 flex items-center justify-between gap-3">
+              <div>
+                <div class="font-semibold text-slate-200">⚡ 多核网络软中断加速 (RPS CPU 1-3 流水线)</div>
+                <div class="text-[11px] text-slate-400 font-mono mt-0.5" id="rps-live-hint">CPU0 基带硬中断 → CPU1-3 协议栈转发 → CPU4-7 代理加解密</div>
+              </div>
+              <label class="inline-flex items-center cursor-pointer shrink-0">
+                <input type="checkbox" id="chk-rps-enable" checked onchange="toggleRpsAccel(this.checked)" class="rounded border-slate-700 text-emerald-500 focus:ring-0 w-4 h-4">
+              </label>
+            </div>
+
+            <div class="grid grid-cols-1 sm:grid-cols-2 gap-3">
+              <div>
+                <label class="text-slate-400">CPU 调度策略 (mu300-cpu)</label>
+                <select id="cpu-governor" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+                  <option value="balanced">Balanced (智能均衡 - 默认)</option>
+                  <option value="performance">Performance (全核高频)</option>
+                  <option value="saving">Saving (省电低频)</option>
+                </select>
+              </div>
+              <div>
+                <label class="text-slate-400">ZRAM 内存压缩交换 (736 MB)</label>
+                <select id="zram-size" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
+                  <option value="on">开启 ZRAM 缓冲 (推荐)</option>
+                  <option value="off">关闭 ZRAM</option>
+                </select>
+              </div>
+            </div>
+            <button onclick="saveCpuConfig()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition">应用 CPU 调度器与 ZRAM 配置</button>
+          </div>
+        </div>
+      </div>
+
+      <!-- 无人值守供电、Wi-Fi 空闲省电休眠与夜间全熄灯控制中心 -->
+      <div class="glass-card rounded-2xl p-5 space-y-4">
+        <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-2 pb-3 border-b border-slate-800">
+          <div>
+            <h3 class="font-semibold text-white">🛡️ 无人值守供电、Wi-Fi 空闲省电休眠与夜间熄灯控制</h3>
+            <p class="text-xs text-slate-400 mt-0.5">专为 24 小时远程服务器 / 随身热点双场景定制：Wi-Fi 空闲休眠仅关闭无线局域网射频（省电约 1W），5G 蜂窝始终保持在线</p>
+          </div>
+        </div>
+        <div class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-3.5 text-xs">
+          <div class="p-3.5 rounded-xl bg-slate-900/75 border border-slate-800 flex flex-col justify-between gap-2">
             <div>
-              <label class="text-slate-400">ZRAM 内存实时压缩交换 (736 MB)</label>
-              <select id="zram-size" class="w-full mt-1 bg-slate-900 border border-slate-800 rounded-xl px-3 py-1.5 text-white">
-                <option value="on">开启 ZRAM 压缩缓冲 (736 MB - 推荐)</option>
-                <option value="off">关闭 ZRAM</option>
-              </select>
+              <div class="font-semibold text-white">🔌 断电再来电自动开机</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">耗尽关机后恢复供电时直接启动进 Ubuntu 系统防失联</div>
             </div>
-            <button onclick="saveCpuConfig()" class="w-full py-2 bg-indigo-600 hover:bg-indigo-500 text-white font-semibold text-xs rounded-xl transition">应用 CPU 调频与 ZRAM 配置</button>
+            <button onclick="togglePowerOnCharger()" id="btn-poc-toggle" class="w-full py-2 px-3 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-slate-200 font-semibold transition">
+              读取中...
+            </button>
+          </div>
+
+          <div class="p-3.5 rounded-xl bg-slate-900/75 border border-slate-800 flex flex-col justify-between gap-2">
+            <div>
+              <div class="font-semibold text-white">🌙 机身指示灯模式 (LED)</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">卧室夜晚或放包内可设为全黑零光扰</div>
+            </div>
+            <select id="pwr-led-mode" onchange="quickSetLedMode(this.value)" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-white">
+              <option value="on">💡 常亮状态指示</option>
+              <option value="breath">⏱️ 亮 60 秒后自动熄灭</option>
+              <option value="off">🌙 静默全黑关灯 (零光污染)</option>
+            </select>
+          </div>
+
+          <div class="p-3.5 rounded-xl bg-slate-900/75 border border-slate-800 flex flex-col justify-between gap-2">
+            <div>
+              <div class="font-semibold text-white">🔋 纯电池模式 Wi-Fi 空闲休眠</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">拔电外出无人连 Wi-Fi 超时后自动关热点省电</div>
+            </div>
+            <select id="sel-bat-wifi-idle" onchange="saveWifiIdlePolicy()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-amber-300 font-mono">
+              <option value="0">0 分钟 (永不休眠)</option>
+              <option value="5">5 分钟无连接自动休眠</option>
+              <option value="10">10 分钟无连接休眠 (推荐)</option>
+              <option value="15">15 分钟无连接自动休眠</option>
+              <option value="30">30 分钟无连接自动休眠</option>
+            </select>
+          </div>
+
+          <div class="p-3.5 rounded-xl bg-slate-900/75 border border-slate-800 flex flex-col justify-between gap-2">
+            <div>
+              <div class="font-semibold text-white">⚡ 插电模式 Wi-Fi 空闲休眠</div>
+              <div class="text-[11px] text-slate-400 mt-0.5">纯远程服务器场景可设自动关 Wi-Fi 降温</div>
+            </div>
+            <select id="sel-plug-wifi-idle" onchange="saveWifiIdlePolicy()" class="w-full bg-slate-950 border border-slate-700 rounded-xl px-3 py-2 text-cyan-300 font-mono">
+              <option value="0">0 分钟 (插电常开热点 - 默认)</option>
+              <option value="15">15 分钟无连接休眠热点</option>
+              <option value="30">30 分钟无连接休眠热点</option>
+              <option value="60">60 分钟无连接休眠热点</option>
+            </select>
           </div>
         </div>
       </div>
@@ -2242,6 +2369,6 @@
   </div>
 
   <!-- 核心逻辑脚本 (模块化外置强缓存) -->
-  <script src="/app.js?v=56d5299f" defer></script>
+  <script src="/app.js?v=4eb20493" defer></script>
 </body>
 </html>
