@@ -1257,23 +1257,221 @@ async function removeVpnProfile(id) {
   loadVpnProfiles();
 }
 
-// 核心引擎
+// 核心引擎与 Mihomo 在线升级中心
+let mihomoUpdatePollTimer = null;
+
 async function loadVpnEngines() {
   const tbody = document.getElementById('vpn-engines-tbody');
-  tbody.innerHTML = '<tr><td colspan="5" class="py-6 text-center text-slate-500 font-sans">正在读取核心引擎状态...</td></tr>';
+  if (tbody) tbody.innerHTML = '<tr><td colspan="5" class="py-6 text-center text-slate-500 font-sans">正在读取核心引擎状态...</td></tr>';
+  checkMihomoUpdate(false);
   const res = await apiCall('vpn.engines');
-  if (res && res.engines) {
-    tbody.innerHTML = res.engines.map(e => `
+  if (res && res.engines && tbody) {
+    tbody.innerHTML = res.engines.map(e => {
+      let actionHtml = '';
+      if (!e.installed) {
+        actionHtml = `<button onclick="installVpnEngine('${escapeAttr(e.name)}')" class="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-black font-bold rounded-lg text-xs">一键安装</button>`;
+      } else if (e.name === 'mihomo') {
+        if (e.has_update && e.latest_version) {
+          actionHtml = `<button onclick="startMihomoUpdate('all')" class="px-2.5 py-1 bg-amber-400 hover:bg-amber-300 text-black font-bold rounded-lg text-xs">⬆️ 升至 v${escapeHtml(e.latest_version)}</button>`;
+        } else {
+          actionHtml = `<button onclick="checkMihomoUpdate(true)" class="px-2.5 py-1 bg-slate-800 hover:bg-slate-700 text-cyan-300 border border-slate-700 rounded-lg text-xs">检测/更新</button>`;
+        }
+      } else {
+        actionHtml = '<span class="text-xs text-slate-500">已安装</span>';
+      }
+      return `
       <tr class="hover:bg-slate-800/40 transition">
-        <td class="py-3 font-bold text-white font-sans">${e.name}</td>
+        <td class="py-3 font-bold text-white font-sans">${escapeHtml(e.name)}</td>
         <td class="py-3">${e.installed ? '<span class="text-emerald-400">已就绪</span>' : '<span class="text-slate-500">未安装</span>'}</td>
-        <td class="py-3 text-slate-400">${e.version || '--'}</td>
+        <td class="py-3 text-slate-300">${escapeHtml(e.version || '--')}</td>
         <td class="py-3 text-slate-400">${e.size ? formatBytes(e.size) : '--'}</td>
-        <td class="py-3 text-right">
-          ${!e.installed ? `<button onclick="installVpnEngine('${e.name}')" class="px-2.5 py-1 bg-cyan-600 hover:bg-cyan-500 text-black font-bold rounded-lg text-xs">一键安装</button>` : '<span class="text-xs text-slate-500">最新版</span>'}
-        </td>
+        <td class="py-3 text-right font-sans">${actionHtml}</td>
       </tr>
-    `).join('');
+    `;
+    }).join('');
+  }
+}
+
+function renderMihomoUpdaterCard(res) {
+  if (!res) return;
+  const loc = res.local || {};
+  const up = res.upstream || {};
+  const curVerEl = document.getElementById('mihomo-cur-ver');
+  const curMetaEl = document.getElementById('mihomo-cur-meta');
+  if (curVerEl) curVerEl.innerText = loc.version ? `v${loc.version}` : (loc.installed ? '已安装' : '未安装');
+  if (curMetaEl) {
+    const parts = [];
+    if (loc.go_version) parts.push(loc.go_version);
+    if (loc.rss_mb) parts.push(`常驻 ${loc.rss_mb} MB`);
+    if (loc.bin_size) parts.push(`体积 ${formatBytes(loc.bin_size)}`);
+    curMetaEl.innerText = parts.join(' · ') || 'ARM64 Linux';
+  }
+
+  const geo = loc.geo || {};
+  const cInfo = geo['Country.mmdb'] || {};
+  const sInfo = geo['GeoSite.dat'] || {};
+  const geoSumEl = document.getElementById('mihomo-geo-summary');
+  const geoMetaEl = document.getElementById('mihomo-geo-meta');
+  if (geoSumEl) {
+    if (cInfo.exists && sInfo.exists) {
+      geoSumEl.innerText = cInfo.mtime_str ? cInfo.mtime_str.split(' ')[0] : '已就绪';
+      geoSumEl.className = res.has_geo_update
+        ? 'text-sm font-bold text-amber-300 font-mono truncate'
+        : 'text-sm font-bold text-emerald-300 font-mono truncate';
+    } else {
+      geoSumEl.innerText = '部分缺失';
+    }
+  }
+  if (geoMetaEl) {
+    const cSz = cInfo.size ? formatBytes(cInfo.size) : '--';
+    const sSz = sInfo.size ? formatBytes(sInfo.size) : '--';
+    geoMetaEl.innerText = `MMDB ${cSz} · GeoSite ${sSz}`;
+  }
+
+  const badge = document.getElementById('mihomo-upd-badge');
+  const latVerEl = document.getElementById('mihomo-latest-ver');
+  const latMetaEl = document.getElementById('mihomo-latest-meta');
+  const notesBox = document.getElementById('mihomo-release-notes');
+
+  if (!res.ok) {
+    if (badge) {
+      badge.innerText = '离线/获取失败';
+      badge.className = 'px-2 py-0.5 rounded text-[11px] font-mono bg-rose-500/15 text-rose-300 border border-rose-500/30';
+    }
+    if (latVerEl) latVerEl.innerText = '网络受限';
+    if (latMetaEl) latMetaEl.innerText = res.error || '请检查网络连接';
+    return;
+  }
+
+  if (latVerEl) latVerEl.innerText = up.latest_version ? `v${up.latest_version}` : '--';
+  if (latMetaEl) {
+    latMetaEl.innerText = `${up.published_at || ''} 发布 · 压缩包 ${up.asset_size ? formatBytes(up.asset_size) : ''}`;
+  }
+
+  if (badge) {
+    if (res.has_kernel_update) {
+      badge.innerText = `🔥 发现新内核 v${up.latest_version}`;
+      badge.className = 'px-2 py-0.5 rounded text-[11px] font-mono font-bold bg-amber-500/20 text-amber-300 border border-amber-500/40';
+    } else if (res.has_geo_update) {
+      badge.innerText = '🌍 内核已最新 · Geo 库可更新';
+      badge.className = 'px-2 py-0.5 rounded text-[11px] font-mono bg-indigo-500/20 text-indigo-300 border border-indigo-500/40';
+    } else {
+      badge.innerText = '✅ 内核与 Geo 库均为最新';
+      badge.className = 'px-2 py-0.5 rounded text-[11px] font-mono bg-emerald-500/15 text-emerald-300 border border-emerald-500/30';
+    }
+  }
+
+  if (notesBox) {
+    if (res.has_kernel_update && Array.isArray(up.notes) && up.notes.length) {
+      notesBox.classList.remove('hidden');
+      notesBox.innerHTML = `<div class="text-cyan-300 font-semibold mb-1">📋 v${escapeHtml(up.latest_version)} 官方更新摘要：</div>` +
+        up.notes.map(n => `<div>• ${escapeHtml(n)}</div>`).join('');
+    } else {
+      notesBox.classList.add('hidden');
+    }
+  }
+
+  if (res.update_state && res.update_state.running) {
+    renderMihomoUpdateState(res.update_state);
+    startMihomoUpdatePolling();
+  }
+}
+
+async function checkMihomoUpdate(manual = false) {
+  const btn = document.getElementById('btn-mihomo-check');
+  if (manual) {
+    showToast('正在连接 GitHub 官方仓库检查 Mihomo 与 Geo 最新版本...');
+    if (btn) { btn.disabled = true; btn.innerText = '⏳ 检测中...'; }
+  }
+  try {
+    const res = await apiCall('vpn.mihomo_check', { force: !!manual });
+    renderMihomoUpdaterCard(res);
+    if (manual && res) {
+      if (!res.ok) {
+        showToast(res.error || '检查更新失败', false);
+      } else if (res.has_kernel_update) {
+        showToast(`发现新正式版 Mihomo v${res.upstream.latest_version}！可点击「一键更新」升级`);
+      } else if (res.has_geo_update) {
+        showToast('Mihomo 内核已是最新正式版，Geo 分流规则库有新版可刷');
+      } else {
+        showToast(`当前 Mihomo v${res.local.version} 与 Geo 规则库均已是最新！`);
+      }
+    }
+  } finally {
+    if (manual && btn) { btn.disabled = false; btn.innerText = '🔍 检测官方更新'; }
+  }
+}
+
+function renderMihomoUpdateState(st) {
+  if (!st) return;
+  const wrap = document.getElementById('mihomo-upd-progress-wrap');
+  const msgEl = document.getElementById('mihomo-upd-msg');
+  const phaseEl = document.getElementById('mihomo-upd-phase');
+  const logsEl = document.getElementById('mihomo-upd-logs');
+  if (!wrap) return;
+  if (st.running || (Array.isArray(st.logs) && st.logs.length)) {
+    wrap.classList.remove('hidden');
+  }
+  if (msgEl) msgEl.innerText = st.msg || '';
+  if (phaseEl) {
+    if (st.running) {
+      phaseEl.innerText = st.phase || 'RUNNING';
+      phaseEl.className = 'text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/20 text-cyan-300 animate-pulse';
+    } else if (st.result_ok) {
+      phaseEl.innerText = 'SUCCESS';
+      phaseEl.className = 'text-[10px] font-mono px-2 py-0.5 rounded bg-emerald-500/20 text-emerald-300';
+    } else {
+      phaseEl.innerText = 'ERROR';
+      phaseEl.className = 'text-[10px] font-mono px-2 py-0.5 rounded bg-rose-500/20 text-rose-300';
+    }
+  }
+  if (logsEl && Array.isArray(st.logs)) {
+    logsEl.innerText = st.logs.join('\n');
+    logsEl.scrollTop = logsEl.scrollHeight;
+  }
+}
+
+function startMihomoUpdatePolling() {
+  if (mihomoUpdatePollTimer) return;
+  mihomoUpdatePollTimer = setInterval(async () => {
+    const st = await apiCall('vpn.mihomo_update_status');
+    if (!st || !st.ok) return;
+    renderMihomoUpdateState(st);
+    if (!st.running) {
+      clearInterval(mihomoUpdatePollTimer);
+      mihomoUpdatePollTimer = null;
+      const btnAll = document.getElementById('btn-mihomo-upgrade');
+      const btnGeo = document.getElementById('btn-mihomo-geo');
+      if (btnAll) btnAll.disabled = false;
+      if (btnGeo) btnGeo.disabled = false;
+      if (st.result_ok) {
+        showToast(st.msg || 'Mihomo 与 Geo 规则库更新成功！');
+      } else {
+        showToast('更新未完成: ' + (st.error || st.msg || ''), false);
+      }
+      loadVpnEngines();
+    }
+  }, 1500);
+}
+
+async function startMihomoUpdate(mode = 'all') {
+  const label = mode === 'geo' ? '刷新最新 Country.mmdb 与 GeoSite.dat 分流库' : '下载并原子升级最新正式版 Mihomo 内核与 Geo 规则库';
+  if (!confirm(`确定要执行「${label}」吗？\n\n系统将自动校验官方 SHA256 摘要并执行 mihomo -t 配置预检，完成后平滑重启代理服务（网络闪断约 2~3 秒）。`)) return;
+
+  const btnAll = document.getElementById('btn-mihomo-upgrade');
+  const btnGeo = document.getElementById('btn-mihomo-geo');
+  if (btnAll) btnAll.disabled = true;
+  if (btnGeo) btnGeo.disabled = true;
+
+  const res = await apiCall('vpn.mihomo_update', { mode });
+  if (res && res.ok) {
+    showToast('已启动后台安全下载与校验任务，请查看下方实时日志...');
+    if (res.state) renderMihomoUpdateState(res.state);
+    startMihomoUpdatePolling();
+  } else {
+    if (btnAll) btnAll.disabled = false;
+    if (btnGeo) btnGeo.disabled = false;
+    showToast('启动更新失败: ' + ((res && res.error) || ''), false);
   }
 }
 

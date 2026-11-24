@@ -5,7 +5,7 @@
   <meta name="viewport" content="width=device-width, initial-scale=1.0">
   <title>U30 Air 5G · 智能控制台</title>
   <link rel="icon" type="image/svg+xml" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Cdefs%3E%3ClinearGradient id='g' x1='0' y1='1' x2='1' y2='0'%3E%3Cstop offset='0' stop-color='%2306b6d4'/%3E%3Cstop offset='1' stop-color='%234f46e5'/%3E%3C/linearGradient%3E%3C/defs%3E%3Crect width='64' height='64' rx='16' fill='url(%23g)'/%3E%3Ctext x='32' y='41' text-anchor='middle' fill='%23fff' font-family='system-ui,sans-serif' font-weight='900' font-size='26'%3E5G%3C/text%3E%3C/svg%3E">
-  <link rel="stylesheet" href="/app.css?v=02df4451">
+  <link rel="stylesheet" href="/app.css?v=9ccf454d">
 </head>
 <body class="bg-[#0b0f19] text-slate-200 font-sans antialiased min-h-screen flex flex-col scrollbar-thin selection:bg-cyan-500 selection:text-white relative">
 
@@ -1755,6 +1755,58 @@
 
       <!-- 子面板 4: 核心引擎 -->
       <div id="vpn-sub-engines" class="vpn-sub-panel space-y-4 hidden">
+        <!-- Mihomo 内核与 Geo 分流规则库在线升级中心 -->
+        <div class="glass-card rounded-2xl p-5 space-y-4 border border-cyan-500/20">
+          <div class="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pb-3 border-b border-slate-800">
+            <div>
+              <div class="flex flex-wrap items-center gap-2">
+                <h4 class="font-semibold text-white">🚀 Mihomo 核心与 Geo 规则库在线升级中心</h4>
+                <span id="mihomo-upd-badge" class="px-2 py-0.5 rounded text-[11px] font-mono bg-slate-800 text-slate-300 border border-slate-700">待检测</span>
+              </div>
+              <p class="text-[11px] text-slate-400 mt-0.5">直连官方稳定版通道（自动校验 SHA256 摘要 + <code class="text-cyan-300">mihomo -t</code> 预检通过后原子热替换，异常自动保护原内核）</p>
+            </div>
+            <div class="flex flex-wrap items-center gap-2 shrink-0">
+              <button type="button" onclick="checkMihomoUpdate(true)" id="btn-mihomo-check" class="px-3 py-1.5 bg-slate-800 hover:bg-slate-700 text-slate-200 border border-slate-700 rounded-xl text-xs font-medium transition">
+                🔍 检测官方更新
+              </button>
+              <button type="button" onclick="startMihomoUpdate('geo')" id="btn-mihomo-geo" class="px-3 py-1.5 bg-indigo-600/90 hover:bg-indigo-500 text-white rounded-xl text-xs font-semibold transition">
+                🌍 仅刷新 Geo 库
+              </button>
+              <button type="button" onclick="startMihomoUpdate('all')" id="btn-mihomo-upgrade" class="px-3.5 py-1.5 bg-cyan-500 hover:bg-cyan-400 text-black font-bold rounded-xl text-xs shadow-lg shadow-cyan-500/20 transition">
+                ⚡ 一键更新内核 + Geo 库
+              </button>
+            </div>
+          </div>
+
+          <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 text-xs">
+            <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+              <div class="text-[11px] text-slate-400">当前运行 Mihomo 内核</div>
+              <div class="text-sm sm:text-base font-bold text-white font-mono" id="mihomo-cur-ver">--</div>
+              <div class="text-[11px] text-slate-400 font-mono truncate" id="mihomo-cur-meta">正在读取运行态信息...</div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+              <div class="text-[11px] text-slate-400">上游最新正式版 (Stable)</div>
+              <div class="text-sm sm:text-base font-bold text-cyan-300 font-mono" id="mihomo-latest-ver">--</div>
+              <div class="text-[11px] text-slate-400 font-mono truncate" id="mihomo-latest-meta">MetaCubeX/mihomo 正式版</div>
+            </div>
+            <div class="p-3.5 rounded-xl bg-slate-900/70 border border-slate-800 space-y-1">
+              <div class="text-[11px] text-slate-400">GeoIP / GeoSite 分流规则库</div>
+              <div class="text-sm font-bold text-emerald-300 font-mono truncate" id="mihomo-geo-summary">--</div>
+              <div class="text-[11px] text-slate-400 font-mono truncate" id="mihomo-geo-meta">Country.mmdb + GeoSite.dat</div>
+            </div>
+          </div>
+
+          <div id="mihomo-release-notes" class="hidden p-3 rounded-xl bg-slate-950/70 border border-slate-800/80 text-[11px] text-slate-300 font-mono space-y-1"></div>
+
+          <div id="mihomo-upd-progress-wrap" class="hidden p-3.5 rounded-xl bg-black/80 border border-cyan-500/30 space-y-2 text-xs">
+            <div class="flex items-center justify-between gap-2">
+              <span id="mihomo-upd-msg" class="font-semibold text-cyan-300">正在准备升级任务...</span>
+              <span id="mihomo-upd-phase" class="text-[10px] font-mono px-2 py-0.5 rounded bg-cyan-500/15 text-cyan-300">RUNNING</span>
+            </div>
+            <pre id="mihomo-upd-logs" class="max-h-40 overflow-y-auto scrollbar-thin text-[11px] font-mono text-emerald-300/95 whitespace-pre-wrap"></pre>
+          </div>
+        </div>
+
         <div class="glass-card rounded-2xl p-5 space-y-4">
           <h4 class="font-semibold text-white pb-3 border-b border-slate-800">代理核心引擎列表</h4>
           <div class="overflow-x-auto">
@@ -2369,6 +2421,6 @@
   </div>
 
   <!-- 核心逻辑脚本 (模块化外置强缓存) -->
-  <script src="/app.js?v=4eb20493" defer></script>
+  <script src="/app.js?v=4fe677b7" defer></script>
 </body>
 </html>

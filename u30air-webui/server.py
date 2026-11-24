@@ -6000,6 +6000,10 @@ class WebUIHandler(BaseHTTPRequestHandler):
                 self.send_json(probe_vpn_group_exit_ips())
                 return
 
+            if method in ("vpn.mihomo_check", "vpn.mihomo_update", "vpn.mihomo_update_status"):
+                self.send_json(handle_mihomo_updater_api(method, req_data))
+                return
+
             if method == "system.drop_caches":
                 self.send_json(drop_memory_caches())
                 return
@@ -6073,6 +6077,8 @@ class WebUIHandler(BaseHTTPRequestHandler):
                         resp = {"ok": 1, "restart": True}
             else:
                 resp = run_mu300_api(method, req_data)
+            if method == "vpn.engines" and isinstance(resp, dict) and isinstance(resp.get("engines"), list):
+                enrich_vpn_engines_list(resp["engines"])
             if method == "wifi.set" and isinstance(resp, dict) and resp.get("ok"):
                 trigger_nfc_wifi_sync_async()
             if method.startswith("power.") or method.startswith("wifi.") or method.startswith("vpn."):
@@ -6686,6 +6692,540 @@ def handle_nfc_api(method, req_data):
         return set_nfc_rf_power(desired)
     if method == "nfc.write":
         return write_nfc_payload(req_data.get("mode", "wifi"), req_data.get("value", ""))
+    return None
+
+# =========================================================================
+# Mihomo 核心引擎与 GeoIP / GeoSite 规则库在线安全检测及原子热升级中心
+# =========================================================================
+MIHOMO_EXTRA_DIR = "/mnt/mu300-disk/extra/vpn-mihomo"
+MIHOMO_BIN_DEFAULT = "/mnt/mu300-disk/extra/vpn-mihomo/bin/mihomo"
+MIHOMO_SHARE_DIR = "/mnt/mu300-disk/extra/vpn-mihomo/share/mihomo"
+MIHOMO_CACHE_DIR = "/etc/mu300/vpn/cache/mihomo"
+MIHOMO_RELEASE_API = "https://api.github.com/repos/MetaCubeX/mihomo/releases/latest"
+MIHOMO_GEO_RELEASE_API = "https://api.github.com/repos/MetaCubeX/meta-rules-dat/releases/latest"
+
+MIHOMO_UPSTREAM_CACHE = {"time": 0.0, "data": None}
+MIHOMO_UPDATE_LOCK = threading.Lock()
+MIHOMO_UPDATE_STATE = {
+    "running": False,
+    "mode": "",
+    "phase": "idle",
+    "msg": "",
+    "ok": None,
+    "error": "",
+    "started_at": 0.0,
+    "finished_at": 0.0,
+    "old_version": "",
+    "new_version": "",
+    "logs": [],
+}
+
+
+def _parse_semver_tuple(ver_str):
+    nums = [int(x) for x in re.findall(r"\d+", str(ver_str or ""))[:4]]
+    while len(nums) < 3:
+        nums.append(0)
+    return tuple(nums)
+
+
+def _sha256_file(path):
+    h = hashlib.sha256()
+    with open(path, "rb") as f:
+        while True:
+            chunk = f.read(262144)
+            if not chunk:
+                break
+            h.update(chunk)
+    return h.hexdigest()
+
+
+def _locate_mihomo_bin():
+    for cand in (MIHOMO_BIN_DEFAULT, "/opt/mu300/bin/mihomo", "/usr/local/bin/mihomo"):
+        if os.path.isfile(cand) and os.access(cand, os.X_OK):
+            return cand
+    return MIHOMO_BIN_DEFAULT
+
+
+def get_mihomo_local_info():
+    mbin = _locate_mihomo_bin()
+    installed = os.path.isfile(mbin) and os.access(mbin, os.X_OK)
+    version = ""
+    go_version = ""
+    build_tags = ""
+    bin_size = 0
+    rss_mb = None
+
+    if installed:
+        try:
+            bin_size = os.path.getsize(mbin)
+        except Exception:
+            bin_size = 0
+        try:
+            proc = subprocess.run([mbin, "-v"], capture_output=True, text=True, timeout=4)
+            out = proc.stdout or ""
+            m_ver = re.search(r"Mihomo(?:\s+Meta)?\s+v?([0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9._-]+)?)", out, re.I)
+            if m_ver:
+                version = m_ver.group(1)
+            m_go = re.search(r"(go[0-9]+\.[0-9]+(?:\.[0-9]+)?)", out)
+            if m_go:
+                go_version = m_go.group(1)
+            m_tag = re.search(r"Use tags:\s*([^\r\n]+)", out)
+            if m_tag:
+                build_tags = m_tag.group(1).strip()
+        except Exception:
+            pass
+
+    if sys.platform.startswith("linux"):
+        try:
+            p_pid = subprocess.run(["pidof", "mihomo"], capture_output=True, text=True, timeout=2)
+            pids = (p_pid.stdout or "").strip().split()
+            if pids:
+                with open(f"/proc/{pids[0]}/status", "r", encoding="utf-8", errors="ignore") as sf:
+                    for ln in sf:
+                        if ln.startswith("VmRSS:"):
+                            kb = int(re.sub(r"[^0-9]", "", ln) or "0")
+                            rss_mb = round(kb / 1024.0, 1)
+                            break
+        except Exception:
+            pass
+
+    geo_files = {}
+    for gname in ("Country.mmdb", "GeoSite.dat"):
+        gpath = os.path.join(MIHOMO_CACHE_DIR, gname)
+        if not os.path.isfile(gpath):
+            gpath = os.path.join(MIHOMO_SHARE_DIR, gname)
+        if os.path.isfile(gpath):
+            try:
+                st = os.stat(gpath)
+                age_days = max(0.0, round((time.time() - st.st_mtime) / 86400.0, 1))
+                geo_files[gname] = {
+                    "exists": True,
+                    "size": st.st_size,
+                    "mtime_str": time.strftime("%Y-%m-%d %H:%M", time.localtime(st.st_mtime)),
+                    "age_days": age_days,
+                    "sha256": _sha256_file(gpath),
+                }
+            except Exception:
+                geo_files[gname] = {"exists": False}
+        else:
+            geo_files[gname] = {"exists": False}
+
+    return {
+        "installed": installed,
+        "bin_path": mbin,
+        "version": version,
+        "go_version": go_version,
+        "build_tags": build_tags,
+        "bin_size": bin_size,
+        "rss_mb": rss_mb,
+        "geo": geo_files,
+    }
+
+
+def _fetch_github_json(url, timeout=14):
+    headers = {"User-Agent": "mu300-webui-updater/1.0", "Accept": "application/vnd.github+json"}
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp:
+            return json.loads(resp.read().decode("utf-8"))
+    except Exception as first_err:
+        if "_fetch_url_direct_uplink" in globals() and sys.platform.startswith("linux"):
+            try:
+                raw = _fetch_url_direct_uplink(url, timeout=timeout, user_agent=headers["User-Agent"])
+                return json.loads(raw.decode("utf-8"))
+            except Exception:
+                pass
+        raise first_err
+
+
+def _download_stream_verified(url, dest_path, expected_sha256="", timeout=180, progress_cb=None):
+    os.makedirs(os.path.dirname(dest_path), exist_ok=True)
+    headers = {"User-Agent": "mu300-webui-updater/1.0"}
+    downloaded = 0
+    h = hashlib.sha256()
+
+    try:
+        req = urllib.request.Request(url, headers=headers)
+        with urllib.request.urlopen(req, timeout=timeout) as resp, open(dest_path, "wb") as out_f:
+            total = int(resp.headers.get("Content-Length") or 0)
+            last_report = 0.0
+            while True:
+                chunk = resp.read(262144)
+                if not chunk:
+                    break
+                out_f.write(chunk)
+                h.update(chunk)
+                downloaded += len(chunk)
+                now = time.time()
+                if progress_cb and (now - last_report >= 1.2):
+                    last_report = now
+                    progress_cb(downloaded, total)
+    except Exception:
+        curl_cmd = ["curl", "-fsSL", "--connect-timeout", "12", "--max-time", str(timeout), "-o", dest_path, url]
+        proc = subprocess.run(curl_cmd, capture_output=True, text=True, timeout=timeout + 10)
+        if proc.returncode != 0:
+            raise RuntimeError(f"下载失败: {(proc.stderr or 'network_error').strip()[:160]}")
+        downloaded = os.path.getsize(dest_path)
+        h_hex = _sha256_file(dest_path)
+    else:
+        h_hex = h.hexdigest()
+
+    if downloaded < 65536:
+        raise RuntimeError(f"下载文件体积异常偏小 ({downloaded} bytes)，已中止替换")
+    if expected_sha256:
+        exp = expected_sha256.lower().replace("sha256:", "").strip()
+        if exp and h_hex.lower() != exp:
+            raise RuntimeError(f"SHA256 完整性校验不匹配 (期望 {exp[:12]}..., 实际 {h_hex[:12]}...)")
+    return downloaded, h_hex
+
+
+def _select_arm64_mihomo_asset(assets):
+    best = None
+    for a in assets or []:
+        name = str(a.get("name") or "")
+        low = name.lower()
+        if not (low.startswith("mihomo-linux-arm64-") and low.endswith(".gz")):
+            continue
+        if any(skip in low for skip in ("compatible", "go120", "go121", "go122", "go123", "cgo")):
+            continue
+        best = a
+        break
+    if best is None:
+        for a in assets or []:
+            low = str(a.get("name") or "").lower()
+            if "linux-arm64" in low and low.endswith(".gz"):
+                best = a
+                break
+    return best
+
+
+def check_mihomo_upstream(force=False):
+    local_info = get_mihomo_local_info()
+    now = time.time()
+    if (not force) and MIHOMO_UPSTREAM_CACHE["data"] and (now - MIHOMO_UPSTREAM_CACHE["time"] < 300):
+        cached = dict(MIHOMO_UPSTREAM_CACHE["data"])
+    else:
+        try:
+            rel = _fetch_github_json(MIHOMO_RELEASE_API, timeout=14)
+            tag = str(rel.get("tag_name") or "").strip()
+            latest_ver = tag.lstrip("vV")
+            asset = _select_arm64_mihomo_asset(rel.get("assets") or [])
+            if not latest_ver or not asset:
+                return {"ok": 0, "error": "未能从官方仓库解析到 linux-arm64 正式版安装包", "local": local_info}
+
+            notes_lines = []
+            for ln in str(rel.get("body") or "").splitlines():
+                s = ln.strip()
+                if s.startswith(("* ", "- ")) and len(notes_lines) < 6:
+                    notes_lines.append(re.sub(r"\s+by\s+@.*$", "", s[2:]).strip())
+
+            geo_assets = {}
+            try:
+                grel = _fetch_github_json(MIHOMO_GEO_RELEASE_API, timeout=12)
+                for ga in grel.get("assets") or []:
+                    gn = str(ga.get("name") or "").lower()
+                    if gn == "country.mmdb":
+                        geo_assets["Country.mmdb"] = {
+                            "url": ga.get("browser_download_url", ""),
+                            "size": int(ga.get("size") or 0),
+                            "sha256": str(ga.get("digest") or "").replace("sha256:", ""),
+                        }
+                    elif gn == "geosite.dat":
+                        geo_assets["GeoSite.dat"] = {
+                            "url": ga.get("browser_download_url", ""),
+                            "size": int(ga.get("size") or 0),
+                            "sha256": str(ga.get("digest") or "").replace("sha256:", ""),
+                        }
+            except Exception:
+                pass
+
+            cached = {
+                "tag": tag,
+                "latest_version": latest_ver,
+                "published_at": str(rel.get("published_at") or "")[:10],
+                "asset_name": asset.get("name", ""),
+                "asset_url": asset.get("browser_download_url", ""),
+                "asset_size": int(asset.get("size") or 0),
+                "asset_sha256": str(asset.get("digest") or "").replace("sha256:", ""),
+                "notes": notes_lines,
+                "geo_upstream": geo_assets,
+                "checked_at": time.strftime("%H:%M:%S"),
+            }
+            MIHOMO_UPSTREAM_CACHE["data"] = dict(cached)
+            MIHOMO_UPSTREAM_CACHE["time"] = now
+        except Exception as e:
+            return {"ok": 0, "error": f"查询上游版本失败: {e}", "local": local_info}
+
+    local_ver = local_info.get("version") or "0.0.0"
+    has_kernel_update = _parse_semver_tuple(local_ver) < _parse_semver_tuple(cached["latest_version"])
+    geo_up = cached.get("geo_upstream") or {}
+    has_geo_update = False
+    for gname in ("Country.mmdb", "GeoSite.dat"):
+        loc_g = (local_info.get("geo") or {}).get(gname) or {}
+        up_g = geo_up.get(gname) or {}
+        if not loc_g.get("exists"):
+            has_geo_update = True
+        elif up_g.get("sha256") and loc_g.get("sha256") != up_g.get("sha256"):
+            has_geo_update = True
+
+    return {
+        "ok": 1,
+        "local": local_info,
+        "upstream": cached,
+        "has_kernel_update": has_kernel_update,
+        "has_geo_update": has_geo_update,
+        "update_state": get_mihomo_update_status(),
+    }
+
+
+def _sync_vpn_mihomo_extra_metadata(new_version):
+    if not os.path.isdir(MIHOMO_EXTRA_DIR):
+        return
+    comp_path = os.path.join(MIHOMO_EXTRA_DIR, "components")
+    if os.path.isfile(comp_path) and new_version:
+        try:
+            with open(comp_path, "r", encoding="utf-8", errors="ignore") as f:
+                comp_txt = f.read()
+            new_comp = re.sub(r"(mihomo[\s:=]+v?)[0-9]+\.[0-9]+\.[0-9]+(?:-[A-Za-z0-9._-]+)?", rf"\g<1>{new_version}", comp_txt, flags=re.I)
+            if new_comp == comp_txt and re.match(r"^v?[0-9]+\.[0-9]+\.[0-9]+", comp_txt.strip()):
+                new_comp = f"{new_version}\n"
+            _atomic_write_text(comp_path, new_comp, mode=0o644)
+        except Exception:
+            pass
+
+    manifest_path = os.path.join(MIHOMO_EXTRA_DIR, "manifest")
+    if os.path.isfile(manifest_path):
+        try:
+            with open(manifest_path, "r", encoding="utf-8", errors="ignore") as mf:
+                m_lines = mf.read().splitlines()
+            rebuilt = []
+            for ln in m_lines:
+                parts = ln.strip().split(None, 1)
+                if len(parts) == 2:
+                    rel_p = parts[1].strip()
+                    abs_p = os.path.normpath(os.path.join(MIHOMO_EXTRA_DIR, rel_p))
+                    if os.path.isfile(abs_p):
+                        rebuilt.append(f"{_sha256_file(abs_p)}  {rel_p}")
+                        continue
+                if ln.strip():
+                    rebuilt.append(ln)
+            _atomic_write_text(manifest_path, "\n".join(rebuilt) + "\n", mode=0o644)
+        except Exception:
+            pass
+
+
+def enrich_vpn_engines_list(engines):
+    info = get_mihomo_local_info()
+    up = MIHOMO_UPSTREAM_CACHE.get("data") or {}
+    for item in engines:
+        if isinstance(item, dict) and item.get("name") == "mihomo":
+            if info.get("version"):
+                item["version"] = info["version"]
+            if info.get("bin_size"):
+                item["size"] = info["bin_size"]
+            if up.get("latest_version"):
+                item["latest_version"] = up["latest_version"]
+                item["has_update"] = _parse_semver_tuple(info.get("version") or "0") < _parse_semver_tuple(up["latest_version"])
+
+
+def get_mihomo_update_status():
+    with MIHOMO_UPDATE_LOCK:
+        return {
+            "ok": 1,
+            "running": MIHOMO_UPDATE_STATE["running"],
+            "mode": MIHOMO_UPDATE_STATE["mode"],
+            "phase": MIHOMO_UPDATE_STATE["phase"],
+            "msg": MIHOMO_UPDATE_STATE["msg"],
+            "result_ok": MIHOMO_UPDATE_STATE["ok"],
+            "error": MIHOMO_UPDATE_STATE["error"],
+            "started_at": MIHOMO_UPDATE_STATE["started_at"],
+            "finished_at": MIHOMO_UPDATE_STATE["finished_at"],
+            "old_version": MIHOMO_UPDATE_STATE["old_version"],
+            "new_version": MIHOMO_UPDATE_STATE["new_version"],
+            "logs": list(MIHOMO_UPDATE_STATE["logs"]),
+        }
+
+
+def _append_mihomo_upd_log(phase, msg):
+    with MIHOMO_UPDATE_LOCK:
+        MIHOMO_UPDATE_STATE["phase"] = phase
+        MIHOMO_UPDATE_STATE["msg"] = msg
+        entry = f"[{time.strftime('%H:%M:%S')}] {msg}"
+        logs = MIHOMO_UPDATE_STATE["logs"]
+        if not logs or logs[-1] != entry:
+            logs.append(entry)
+            if len(logs) > 30:
+                del logs[:-30]
+
+
+def start_mihomo_update_job(req_data):
+    mode = str((req_data or {}).get("mode") or "all").strip().lower()
+    if mode not in ("all", "kernel", "geo"):
+        mode = "all"
+    force_kernel = bool((req_data or {}).get("force", False))
+
+    with MIHOMO_UPDATE_LOCK:
+        if MIHOMO_UPDATE_STATE["running"]:
+            return {"ok": 0, "error": "已有正在执行的 Mihomo 升级任务，请稍候"}
+        local_now = get_mihomo_local_info()
+        MIHOMO_UPDATE_STATE.update({
+            "running": True,
+            "mode": mode,
+            "phase": "checking",
+            "msg": "正在连接上游获取最新正式版信息与 SHA256 摘要...",
+            "ok": None,
+            "error": "",
+            "started_at": time.time(),
+            "finished_at": 0.0,
+            "old_version": local_now.get("version") or "",
+            "new_version": local_now.get("version") or "",
+            "logs": [f"[{time.strftime('%H:%M:%S')}] 启动在线更新任务 (模式: {mode})"],
+        })
+
+    def _worker():
+        import shutil as _shutil
+        stage_tmp = "/tmp/mu300-mihomo-upd"
+        try:
+            _shutil.rmtree(stage_tmp, ignore_errors=True)
+            os.makedirs(stage_tmp, exist_ok=True)
+
+            chk = check_mihomo_upstream(force=True)
+            if not chk.get("ok"):
+                raise RuntimeError(chk.get("error") or "无法获取上游发布信息")
+
+            local_info = chk["local"]
+            up = chk["upstream"]
+            target_bin = local_info["bin_path"]
+            did_change = False
+
+            if mode in ("all", "geo"):
+                geo_up = up.get("geo_upstream") or {}
+                for gname in ("Country.mmdb", "GeoSite.dat"):
+                    gmeta = geo_up.get(gname)
+                    if not gmeta or not gmeta.get("url"):
+                        continue
+                    loc_sha = ((local_info.get("geo") or {}).get(gname) or {}).get("sha256", "")
+                    if loc_sha and gmeta.get("sha256") and loc_sha == gmeta["sha256"] and mode != "geo":
+                        _append_mihomo_upd_log("geo", f"{gname} 已是最新 ({gmeta['sha256'][:10]}...)，跳过重复下载")
+                        continue
+                    _append_mihomo_upd_log("downloading_geo", f"正在下载并校验 {gname} ({round(gmeta.get('size', 0)/1048576, 2)} MB)...")
+                    tmp_g = os.path.join(stage_tmp, gname)
+                    _download_stream_verified(
+                        gmeta["url"],
+                        tmp_g,
+                        expected_sha256=gmeta.get("sha256", ""),
+                        timeout=150,
+                        progress_cb=lambda dl, tot, gn=gname: _append_mihomo_upd_log(
+                            "downloading_geo",
+                            f"正在下载 {gn}: {round(dl/1048576, 1)} / {round(tot/1048576, 1) if tot else '?'} MB",
+                        ),
+                    )
+                    for dst_dir in (MIHOMO_SHARE_DIR, MIHOMO_CACHE_DIR):
+                        if os.path.isdir(dst_dir) or dst_dir == MIHOMO_CACHE_DIR:
+                            os.makedirs(dst_dir, exist_ok=True)
+                            staged_dst = os.path.join(dst_dir, f".{gname}.new.{os.getpid()}")
+                            _shutil.copyfile(tmp_g, staged_dst)
+                            os.chmod(staged_dst, 0o600 if dst_dir == MIHOMO_CACHE_DIR else 0o644)
+                            os.replace(staged_dst, os.path.join(dst_dir, gname))
+                    os.remove(tmp_g)
+                    did_change = True
+                    _append_mihomo_upd_log("geo_done", f"{gname} SHA256 校验通过并已原子更新")
+
+            if mode in ("all", "kernel"):
+                if chk.get("has_kernel_update") or force_kernel or not local_info.get("installed"):
+                    gz_tmp = os.path.join(stage_tmp, "mihomo.gz")
+                    _append_mihomo_upd_log(
+                        "downloading_kernel",
+                        f"正在下载 {up['asset_name']} ({round(up.get('asset_size', 0)/1048576, 1)} MB)...",
+                    )
+                    _download_stream_verified(
+                        up["asset_url"],
+                        gz_tmp,
+                        expected_sha256=up.get("asset_sha256", ""),
+                        timeout=240,
+                        progress_cb=lambda dl, tot: _append_mihomo_upd_log(
+                            "downloading_kernel",
+                            f"正在下载内核压缩包: {round(dl/1048576, 1)} / {round(tot/1048576, 1) if tot else '?'} MB",
+                        ),
+                    )
+                    _append_mihomo_upd_log("verifying_kernel", "压缩包 SHA256 校验通过，正在流式解压并执行配置兼容预检...")
+                    os.makedirs(os.path.dirname(target_bin), exist_ok=True)
+                    staged_bin = os.path.join(os.path.dirname(target_bin), f".mihomo.new.{os.getpid()}")
+                    try:
+                        with gzip.open(gz_tmp, "rb") as gf, open(staged_bin, "wb") as bf:
+                            _shutil.copyfileobj(gf, bf, length=262144)
+                        os.remove(gz_tmp)
+                        os.chmod(staged_bin, 0o755)
+
+                        p_ver = subprocess.run([staged_bin, "-v"], capture_output=True, text=True, timeout=6)
+                        if p_ver.returncode != 0 or "mihomo" not in (p_ver.stdout or "").lower():
+                            raise RuntimeError(f"新内核可执行性自检未通过: {(p_ver.stderr or p_ver.stdout or '').strip()[:120]}")
+
+                        live_cfg = "/run/mu300-vpn/mihomo.yaml"
+                        if os.path.isfile(live_cfg) and os.path.isdir(MIHOMO_CACHE_DIR):
+                            p_chk = subprocess.run([staged_bin, "-t", "-d", MIHOMO_CACHE_DIR, "-f", live_cfg], capture_output=True, text=True, timeout=12)
+                            if p_chk.returncode != 0:
+                                raise RuntimeError("新内核对当前活动配置的 -t 预检未通过，已自动中止替换保护原内核")
+
+                        os.replace(staged_bin, target_bin)
+                    finally:
+                        if os.path.exists(staged_bin):
+                            try:
+                                os.remove(staged_bin)
+                            except Exception:
+                                pass
+
+                    did_change = True
+                    _append_mihomo_upd_log("kernel_installed", f"内核已原子升级至 v{up['latest_version']}")
+                else:
+                    _append_mihomo_upd_log("kernel_skip", f"当前内核 v{local_info.get('version')} 已是最新正式版")
+
+            after_info = get_mihomo_local_info()
+            _sync_vpn_mihomo_extra_metadata(after_info.get("version") or up.get("latest_version") or "")
+
+            if did_change and sys.platform.startswith("linux"):
+                _append_mihomo_upd_log("restarting", "正在平滑重启 mu300-vpn 服务加载新内核与 Geo 规则库...")
+                subprocess.run(["systemctl", "restart", "mu300-vpn.service"], capture_output=True, timeout=25)
+                for _ in range(8):
+                    time.sleep(1.0)
+                    p_up = subprocess.run(["pidof", "mihomo"], capture_output=True, text=True, timeout=2)
+                    if (p_up.stdout or "").strip():
+                        break
+                after_info = get_mihomo_local_info()
+
+            MIHOMO_UPSTREAM_CACHE["time"] = 0.0
+            done_msg = f"升级完成！当前运行 Mihomo v{after_info.get('version') or up.get('latest_version')}"
+            if after_info.get("rss_mb"):
+                done_msg += f" (内存 {after_info['rss_mb']} MB)"
+            _append_mihomo_upd_log("done", done_msg)
+            with MIHOMO_UPDATE_LOCK:
+                MIHOMO_UPDATE_STATE["running"] = False
+                MIHOMO_UPDATE_STATE["ok"] = True
+                MIHOMO_UPDATE_STATE["finished_at"] = time.time()
+                MIHOMO_UPDATE_STATE["new_version"] = after_info.get("version") or up.get("latest_version") or ""
+        except Exception as e:
+            err_s = str(e)
+            _append_mihomo_upd_log("error", f"更新中止: {err_s}")
+            with MIHOMO_UPDATE_LOCK:
+                MIHOMO_UPDATE_STATE["running"] = False
+                MIHOMO_UPDATE_STATE["ok"] = False
+                MIHOMO_UPDATE_STATE["error"] = err_s
+                MIHOMO_UPDATE_STATE["finished_at"] = time.time()
+        finally:
+            _shutil.rmtree(stage_tmp, ignore_errors=True)
+
+    threading.Thread(target=_worker, daemon=True).start()
+    return {"ok": 1, "started": True, "state": get_mihomo_update_status()}
+
+
+def handle_mihomo_updater_api(method, req_data):
+    req_data = req_data if isinstance(req_data, dict) else {}
+    if method == "vpn.mihomo_check":
+        return check_mihomo_upstream(force=bool(req_data.get("force", False)))
+    if method == "vpn.mihomo_update":
+        return start_mihomo_update_job(req_data)
+    if method == "vpn.mihomo_update_status":
+        return get_mihomo_update_status()
     return None
 
 def main():
